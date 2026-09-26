@@ -578,6 +578,8 @@ function renderGM(){
     <button class="btn primary" id="upBtn">${ICON.up} Adicionar sons</button>
     <input class="search" id="search" type="search" placeholder="Buscar som ou pasta…" value="${esc(filter)}" aria-label="Buscar som">
     <span style="flex:1"></span>
+    <button class="btn dice-btn" id="diceBtn" aria-haspopup="dialog" title="Rolar dados (só você vê)">${DICE_ICON} Rolar dados</button>
+    <span style="flex:1"></span>
     <label class="sub" style="display:flex;align-items:center;gap:8px">${ICON.vol}<input type="range" id="myVol" min="0" max="1" step="0.05" value="${myVol}" aria-label="Volume só no seu PC"></label>
     <button class="btn danger" id="stopAll">${ICON.hush} Silêncio total</button>
   </div>
@@ -613,6 +615,7 @@ function renderGM(){
     </section>
   </div>`;
   $("#upBtn").onclick = openUpload;
+  $("#diceBtn").onclick = e => { e.stopPropagation(); toggleDicePanel(); };
   $("#stopAll").onclick = stopAll;
   const se = $("#search"); se.oninput = e => { filter = e.target.value; render(); };
   if (keep === "search") { se.focus(); se.setSelectionRange(se.value.length, se.value.length); }
@@ -762,6 +765,105 @@ async function moveFolder(name, target, after){
   const {error} = await sb.from("folders").upsert(list.map((n, i) => ({name:n, sort:i, color: folderColors[n] || null})));
   if (error) toast("Não salvei a ordem das pastas: " + error.message);
 }
+
+// ---------- rolador de dados (só o mestre vê) ----------
+const DICE = [4, 6, 8, 10, 12, 20];
+const DICE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2 21 7v10l-9 5-9-5V7z"/><path d="M12 2v7m0 0-9-2m9 2 9-2m-9 2-5 8m5-8 5 8M3 17h18M7 17l5 5 5-5"/></svg>';
+const DIE_SHAPE = {
+  4: "polygon(50% 4%, 97% 90%, 3% 90%)",
+  6: "polygon(8% 8%, 92% 8%, 92% 92%, 8% 92%)",
+  8: "polygon(50% 2%, 96% 50%, 50% 98%, 4% 50%)",
+  10: "polygon(50% 2%, 97% 40%, 80% 90%, 20% 90%, 3% 40%)",
+  12: "polygon(50% 2%, 90% 22%, 98% 65%, 72% 97%, 28% 97%, 2% 65%, 10% 22%)",
+  20: "polygon(50% 1%, 94% 25%, 94% 75%, 50% 99%, 6% 75%, 6% 25%)",
+};
+const DIE_COLOR = {4:"#6a8f4e", 6:"#b8872f", 8:"#4a72b8", 10:"#8a5bb0", 12:"#b0563d", 20:"#c9a227"};
+let diceCounts = (() => { try { return JSON.parse(localStorage.getItem("mesa.dice")) || {}; } catch { return {}; } })();
+let diceMod = 0;
+const saveDice = () => { try { localStorage.setItem("mesa.dice", JSON.stringify(diceCounts)); } catch {} };
+const dieFace = (sides, val, cls = "") => `<span class="die d${sides} ${cls}" style="--dc:${DIE_COLOR[sides]};--shape:${DIE_SHAPE[sides]}"><span class="die-n">${val}</span></span>`;
+function diceFormula(){
+  let f = [...DICE].reverse().filter(d => diceCounts[d] > 0).map(d => `${diceCounts[d]}d${d}`).join(" + ");
+  if (diceMod) f += (diceMod > 0 ? " + " : " − ") + Math.abs(diceMod);
+  return f;
+}
+function closeDice(){ $("#dicePanel")?.remove(); $("#diceStage")?.remove(); }
+function toggleDicePanel(){
+  if ($("#dicePanel")) return closeDice();
+  closeDice();
+  const p = document.createElement("div");
+  p.id = "dicePanel"; p.className = "dice-panel"; p.setAttribute("role", "dialog"); p.setAttribute("aria-label", "Rolar dados");
+  document.body.appendChild(p);
+  const draw = () => {
+    const any = DICE.some(d => diceCounts[d] > 0);
+    p.innerHTML = `<div class="dice-head"><b>Rolar dados</b><span class="sub">só você vê</span></div>
+      <div class="dice-menu">${DICE.map(d => { const n = diceCounts[d] || 0; return `<div class="dcard ${n ? "on" : ""}" style="--dc:${DIE_COLOR[d]}">
+        <button class="dpick" data-dplus="${d}" aria-label="Adicionar um d${d}">${dieFace(d, d, "card")}${n ? `<span class="dbadge">${n}×</span>` : ""}</button>
+        <span class="dlabel">d${d}</span>
+        <div class="dctl"><button class="dstep" data-dminus="${d}" aria-label="Menos um d${d}" ${n ? "" : "disabled"}>−</button><span class="dcount" aria-live="polite">${n}</span><button class="dstep" data-dplus="${d}" aria-label="Mais um d${d}">+</button></div></div>`; }).join("")}</div>
+      <div class="dmod"><span class="dlabel">Bônus</span><button class="dstep" data-mod="-1" aria-label="Diminuir bônus">−</button><span class="dcount">${diceMod > 0 ? "+" + diceMod : diceMod}</span><button class="dstep" data-mod="1" aria-label="Aumentar bônus">+</button></div>
+      <div class="dice-formula">${any ? esc(diceFormula()) : "Escolha os dados"}</div>
+      <div class="dice-actions"><button class="btn small" id="dClear" ${any || diceMod ? "" : "disabled"}>Limpar</button>
+      <button class="btn primary" id="dRoll" ${any ? "" : "disabled"}>${DICE_ICON} Jogar</button></div>`;
+  };
+  draw();
+  const b = $("#diceBtn").getBoundingClientRect();
+  p.style.top = (window.scrollY + b.bottom + 8) + "px";
+  p.style.left = Math.max(12, Math.min(window.scrollX + b.left + b.width / 2 - 210, document.documentElement.clientWidth - 432)) + "px";
+  p.onclick = e => {
+    e.stopPropagation();
+    const t = e.target.closest("button"); if (!t) return;
+    if (t.dataset.dplus) { const d = +t.dataset.dplus; diceCounts[d] = Math.min(20, (diceCounts[d] || 0) + 1); }
+    else if (t.dataset.dminus) { const d = +t.dataset.dminus; diceCounts[d] = Math.max(0, (diceCounts[d] || 0) - 1); }
+    else if (t.dataset.mod) diceMod = Math.max(-20, Math.min(20, diceMod + +t.dataset.mod));
+    else if (t.id === "dClear") { diceCounts = {}; diceMod = 0; }
+    else if (t.id === "dRoll") return rollDice();
+    saveDice(); draw();
+  };
+}
+document.addEventListener("click", e => { const p = $("#dicePanel"); if (p && !p.contains(e.target) && !e.target.closest("#diceBtn")) p.remove(); });
+function rollDice(){
+  const dice = [];
+  for (const d of [...DICE].reverse()) for (let i = 0; i < (diceCounts[d] || 0); i++) dice.push({d, v: 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * d)});
+  if (!dice.length) return;
+  const formula = diceFormula(), mod = diceMod;
+  $("#dicePanel")?.remove(); $("#diceStage")?.remove();
+  const st = document.createElement("div");
+  st.id = "diceStage"; st.className = "dice-stage"; st.setAttribute("role", "dialog"); st.setAttribute("aria-label", "Resultado dos dados");
+  st.innerHTML = `<div class="dice-table">${dice.map((x, i) => {
+      const dx = (Math.random() * 2 - 1) * 260, rot = (Math.random() * 2 - 1) * 900;
+      return `<span class="die d${x.d} big rolling" style="--dc:${DIE_COLOR[x.d]};--shape:${DIE_SHAPE[x.d]};--dx:${dx}px;--rot:${rot}deg;--delay:${i * 60}ms" data-i="${i}"><span class="die-n">?</span><span class="die-t">d${x.d}</span></span>`; }).join("")}</div>
+    <div class="dice-result" aria-live="polite"></div>
+    <div class="dice-actions"><button class="btn" id="dAgain">${DICE_ICON} Rolar de novo</button><button class="btn" id="dEdit">Mudar dados</button><button class="btn primary" id="dClose">Fechar</button></div>`;
+  document.body.appendChild(st);
+  const els = [...st.querySelectorAll(".die.big")];
+  const t0 = performance.now(), dur = 1100;
+  const tick = now => {
+    let done = true;
+    els.forEach((el, i) => {
+      const end = dur + i * 60;
+      const n = el.querySelector(".die-n");
+      if (now - t0 < end) { done = false; if (Math.random() < .5) n.textContent = 1 + Math.floor(Math.random() * dice[i].d); }
+      else if (!el.classList.contains("landed")) {
+        n.textContent = dice[i].v; el.classList.remove("rolling"); el.classList.add("landed");
+        if (dice[i].d === 20 && dice[i].v === 20) el.classList.add("crit");
+        if (dice[i].d === 20 && dice[i].v === 1) el.classList.add("fumble");
+      }
+    });
+    if (!done) return requestAnimationFrame(tick);
+    const sum = dice.reduce((a, x) => a + x.v, 0) + mod;
+    const d20s = dice.filter(x => x.d === 20);
+    const tag = d20s.some(x => x.v === 20) ? '<span class="crit-tag">20 natural!</span>' : d20s.some(x => x.v === 1) ? '<span class="fumble-tag">1 natural…</span>' : "";
+    st.querySelector(".dice-result").innerHTML = `<div class="dice-total">${sum}</div><div class="sub">${esc(formula)} → ${dice.map(x => x.v).join(" + ")}${mod ? (mod > 0 ? " + " : " − ") + Math.abs(mod) : ""}</div>${tag}`;
+  };
+  requestAnimationFrame(tick);
+  st.onclick = e => {
+    if (e.target.id === "dAgain" || e.target.closest("#dAgain")) return rollDice();
+    if (e.target.closest("#dEdit")) { st.remove(); return toggleDicePanel(); }
+    if (e.target.closest("#dClose") || e.target === st) st.remove();
+  };
+  st.querySelector("#dClose").focus({preventScroll: true});
+}
 function setMyVol(v){ myVol = v; A.setMaster(v); try { localStorage.setItem("mesa.vol", String(v)); } catch {} }
 function renderPlayer(){
   const v = $("#view");
@@ -804,7 +906,8 @@ $("#authBtn").onclick = async () => {
 };
 document.addEventListener("keydown", e => {
   if (!isGM || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.target.closest("input,select,textarea") || $(".overlay")) return;
+  if (e.key === "Escape" && ($("#diceStage") || $("#dicePanel"))) { closeDice(); return; }
+  if (e.target.closest("input,select,textarea") || $(".overlay") || $("#diceStage") || $("#dicePanel")) return;
   if (e.key === "Escape") { closeMenu(); return; }
   const i = KEYS.indexOf(e.key.toUpperCase()); if (i < 0) return;
   const s = visibleSfx[i]; if (!s) return;
