@@ -25,7 +25,6 @@ let peers = [];
 let joined = false;
 let filter = "";
 let lastSfx = null;
-let side = null;          // null = lado padrão de cada som, -1 esquerdo, 1 direito
 let curFolder = "";       // "" todas, "__fav" favoritos, ou nome da pasta
 let visibleSfx = [];
 let myVol = 0.85, nick = "";
@@ -46,6 +45,35 @@ function ytStart(u){
 }
 const parseTime = v => { v = String(v || "").trim(); if (!v) return null; if (v.includes(":")) { const [a, b] = v.split(":"); return (+a)*60 + (+b || 0); } const n = parseFloat(v.replace(",", ".")); return isNaN(n) ? null : n; };
 const fmtTime = n => n == null || n === "" ? "" : Math.floor(n/60) + ":" + String(Math.round(n % 60)).padStart(2, "0");
+const COLORS = [["", "Sem cor"], ["#c0473a", "Vermelho"], ["#d27a2c", "Laranja"], ["#c9a227", "Amarelo"], ["#5f9a4a", "Verde"], ["#3f8f8a", "Turquesa"], ["#4a72b8", "Azul"], ["#8456b0", "Roxo"], ["#b8558a", "Rosa"], ["#7a7066", "Cinza"]];
+const EMOJIS = ["🐉","🐺","👹","🧟","🕷️","💀","👻","🦇","🐻","🐍","⚔️","🏹","🛡️","💥","🔥","⚡","❄️","✨","🔮","🪄","💰","🚪","🪨","🌲","🌊","🌧️","🌪️","🍺","🎵","🥁","🔔","❤️","😱","🏰","⛰️","🌙"];
+const firstGrapheme = t => { t = String(t || "").trim(); if (!t) return ""; try { return [...new Intl.Segmenter("pt", {granularity:"grapheme"}).segment(t)][0].segment; } catch { return [...t][0]; } };
+const safeColor = c => /^#[0-9a-f]{6}$/i.test(c || "") ? c : "";
+const look = s => safeColor(s.color) ? ` style="--c:${safeColor(s.color)}"` : "";
+const emo = (s, cls = "emo") => s.emoji ? `<span class="${cls}" aria-hidden="true">${esc(s.emoji)}</span>` : "";
+function folderPicker(root, initial){
+  // botões com as pastas existentes + "Nova pasta"
+  let value = initial || "";
+  const draw = () => {
+    const fl = folders(); if (value && !fl.includes(value)) fl.push(value);
+    root.innerHTML = `<div class="pick">${[["", "Sem pasta"], ...fl.map(f => [f, f])].map(([v, l]) => `<button type="button" class="pbtn" data-f="${esc(v)}" aria-pressed="${v === value}">${v ? ICON.folder + " " : ""}${esc(l)}</button>`).join("")}<button type="button" class="pbtn new" data-new="1">+ Nova pasta</button></div>`;
+  };
+  draw();
+  root.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.new) {
+      b.outerHTML = `<span class="newf"><input type="text" maxlength="40" placeholder="nome da pasta" aria-label="Nome da nova pasta"><button type="button" class="pbtn ok">Criar</button></span>`;
+      const inp = root.querySelector(".newf input"); inp.focus();
+      const ok = () => { const v = inp.value.trim().slice(0, 40); if (v) value = v; draw(); };
+      root.querySelector(".newf .ok").onclick = ok;
+      inp.onkeydown = ev => { if (ev.key === "Enter") { ev.preventDefault(); ok(); } if (ev.key === "Escape") draw(); };
+      return;
+    }
+    if (b.dataset.f !== undefined) { value = b.dataset.f; draw(); }
+  };
+  return { get: () => value };
+}
+const KIND_BTNS = [["sfx", "Efeito"], ["ambient", "Ambiente"], ["music", "Trilha"]];
 const folders = () => [...new Set(sounds.map(s => (s.folder || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 function ytId(u){
   try {
@@ -85,7 +113,7 @@ const A = {
     for (const vc of this.all()) if (vc.type === "yt") vc.apply();
   },
   all(){ return [this.music, ...this.amb.values(), this.preview, ...this.ytPool.values()].filter(Boolean); },
-  panNode(pan){ const p = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null; if (p) p.pan.value = Math.max(-1, Math.min(1, Number(pan) || 0)); return p; },
+  panNode(){ return null; },
 
   fileVoice(s, vol, startedAt, dest){
     const el = new Audio(); el.crossOrigin = "anonymous"; el.src = s.url; el.loop = true; el.preload = "auto";
@@ -202,7 +230,6 @@ const A = {
         if (this.music) this.music.stop(2);
         this.music = this.voice(byId(m.sid), m.vol ?? .8, m.at); this.music.at = m.at;
       } else if (Math.abs(this.music.target - (m.vol ?? .8)) > .001) this.music.fade(m.vol ?? .8, .3);
-      if (this.music?.pn) this.music.pn.pan.value = Number(byId(m.sid).pan) || 0;
     } else if (this.music) { this.music.stop(2); this.music = null; }
 
     const want = live.amb || {};
@@ -212,7 +239,6 @@ const A = {
       const w = want[sid], cur = this.amb.get(sid);
       if (!cur) this.amb.set(sid, this.voice(s, w.vol ?? .7, w.at));
       else if (Math.abs(cur.target - (w.vol ?? .7)) > .001) cur.fade(w.vol ?? .7, .3);
-      if (cur?.pn) cur.pn.pan.value = Number(s.pan) || 0;
     }
   },
   async buffer(s){
@@ -273,9 +299,8 @@ function setLiveVol(kind, sid, v){
 }
 function fireSfx(s){
   A.init(); flashPad(s.id);
-  const pan = side === null ? (Number(s.pan) || 0) : side;
-  A.sfx(s, s.volume ?? 1, pan);
-  chan?.send({type:"broadcast", event:"sfx", payload:{sid:s.id, vol:s.volume ?? 1, pan}});
+  A.sfx(s, s.volume ?? 1);
+  chan?.send({type:"broadcast", event:"sfx", payload:{sid:s.id, vol:s.volume ?? 1}});
 }
 function stopAll(){
   A.init(); A.stopSfx();
@@ -298,7 +323,8 @@ function probeDuration(file){
 }
 const defVol = k => k === "sfx" ? 1 : k === "music" ? .75 : .7;
 let upKind = "sfx", upTab = "file";
-const upFolder = () => ($("#upFolder")?.value || "").trim().slice(0, 40);
+let upFP = null;
+const upFolder = () => (upFP ? upFP.get() : "").trim().slice(0, 40);
 async function handleFiles(files){
   const q = $("#queue");
   for (const f of files) {
@@ -353,8 +379,8 @@ function openUpload(){
       <button data-k="ambient"><b>Ambiente</b><small>floresta, chuva, taverna</small></button>
       <button data-k="music"><b>Trilha</b><small>música de fundo</small></button>
     </div>
-    <label class="field">Pasta (opcional)<input id="upFolder" type="text" maxlength="40" list="folderList" placeholder="ex.: Floresta, Masmorra, Chefão"></label>
-    <datalist id="folderList">${folders().map(f => `<option value="${esc(f)}">`).join("")}</datalist>
+    <div class="field">Pasta</div>
+    <div id="upFolders" style="margin-bottom:12px"></div>
     <div id="paneFile">
       <p>MP3, WAV, OGG, M4A e WEBM. Até 50 MB por arquivo.</p>
       <label class="drop" id="drop" for="fileIn">Arraste os arquivos aqui ou <u>escolha no computador</u></label>
@@ -371,7 +397,7 @@ function openUpload(){
     <div class="queue" id="queue"></div>
     <div class="foot"><button class="btn" id="upClose">Fechar</button></div></div>`;
   document.body.appendChild(ov);
-  if (curFolder && curFolder !== "__fav") $("#upFolder").value = curFolder;
+  upFP = folderPicker($("#upFolders"), curFolder && curFolder !== "__fav" ? curFolder : "");
   const seg = $("#kindSeg");
   const paint = () => {
     seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.k === upKind));
@@ -401,28 +427,40 @@ function showMenu(s, anchor){
   const m = document.createElement("div"); m.className = "menu";
   const isYt = s.source === "youtube";
   m.innerHTML = `<label>Nome<input type="text" id="mName" maxlength="60"></label>
-    <label>Tipo<select id="mKind"><option value="sfx">Efeito</option><option value="ambient">Ambiente</option><option value="music">Trilha</option></select></label>
-    <label>Pasta<input type="text" id="mFolder" maxlength="40" list="mFolderList" placeholder="sem pasta"></label>
-    <datalist id="mFolderList">${folders().map(f => `<option value="${esc(f)}">`).join("")}</datalist>
-    <label>Lado<select id="mPan"><option value="-1">Esquerdo</option><option value="0">Centro (os dois)</option><option value="1">Direito</option></select></label>
-    ${isYt ? `<p class="sub" style="margin:-4px 0 0;text-transform:none;letter-spacing:0">Sons do YouTube sempre tocam nos dois lados.</p>
-    <div style="display:flex;gap:8px"><label style="flex:1">Começa em<input type="text" id="mStart" placeholder="0:00"></label><label style="flex:1">Termina em<input type="text" id="mEnd" placeholder="fim"></label></div>` : ""}
+    <label>Tipo</label>
+    <div class="pick" id="mKinds">${KIND_BTNS.map(([k, l]) => `<button type="button" class="pbtn" data-kind="${k}">${l}</button>`).join("")}</div>
+    <label>Pasta</label>
+    <div id="mFolders"></div>
+    <label>Cor</label>
+    <div class="swatches" id="mColors" role="radiogroup" aria-label="Cor do botão">${COLORS.map(([c, n]) => `<button type="button" role="radio" class="swatch-btn ${c ? "" : "none"}" data-color="${c}" title="${n}" aria-label="${n}" style="${c ? "background:" + c : ""}"></button>`).join("")}</div>
+    <label>Ícone<input type="text" id="mEmoji" maxlength="8" placeholder="cole ou escolha um emoji"></label>
+    <div class="emoji-pick" id="mEmojis">${EMOJIS.map(e => `<button type="button" data-emoji="${e}" aria-label="${e}">${e}</button>`).join("")}<button type="button" data-emoji="" class="clear" title="Sem ícone">✕</button></div>
+    ${isYt ? `<div style="display:flex;gap:8px"><label style="flex:1">Começa em<input type="text" id="mStart" placeholder="0:00"></label><label style="flex:1">Termina em<input type="text" id="mEnd" placeholder="fim"></label></div>` : ""}
     <label>Volume padrão<input type="range" id="mVol" min="0" max="1" step="0.05"></label>
     <div class="acts"><button class="btn danger" id="mDel">Excluir</button><button class="btn primary" id="mSave">Salvar</button></div>`;
   document.body.appendChild(m); openMenu = m;
-  $("#mName", m).value = s.name; $("#mKind", m).value = s.kind; $("#mVol", m).value = s.volume ?? 1;
-  $("#mFolder", m).value = s.folder || "";
-  const pv = Number(s.pan) || 0; $("#mPan", m).value = pv < 0 ? "-1" : pv > 0 ? "1" : "0";
-  if (isYt) { $("#mPan", m).disabled = true; $("#mStart", m).value = s.yt_start ? fmtTime(s.yt_start) : ""; $("#mEnd", m).value = s.yt_end ? fmtTime(s.yt_end) : ""; }
+  $("#mName", m).value = s.name; $("#mVol", m).value = s.volume ?? 1;
+  let kind = s.kind;
+  const paintKinds = () => m.querySelectorAll("[data-kind]").forEach(b => b.setAttribute("aria-pressed", b.dataset.kind === kind));
+  paintKinds();
+  $("#mKinds", m).onclick = e => { const b = e.target.closest("[data-kind]"); if (b) { kind = b.dataset.kind; paintKinds(); } };
+  const fp = folderPicker($("#mFolders", m), s.folder || "");
+  let color = safeColor(s.color);
+  const paintColors = () => m.querySelectorAll("[data-color]").forEach(b => b.setAttribute("aria-checked", b.dataset.color === color));
+  paintColors();
+  $("#mColors", m).onclick = e => { const b = e.target.closest("[data-color]"); if (b) { color = b.dataset.color; paintColors(); } };
+  $("#mEmoji", m).value = s.emoji || "";
+  $("#mEmojis", m).onclick = e => { const b = e.target.closest("[data-emoji]"); if (b) $("#mEmoji", m).value = b.dataset.emoji; };
+  if (isYt) { $("#mStart", m).value = s.yt_start ? fmtTime(s.yt_start) : ""; $("#mEnd", m).value = s.yt_end ? fmtTime(s.yt_end) : ""; }
   const r = anchor.getBoundingClientRect();
   const top = window.scrollY + r.bottom + 4;
   m.style.top = top + "px";
-  m.style.left = Math.max(16, Math.min(window.scrollX + r.right - 240, document.documentElement.clientWidth - 256)) + "px";
+  m.style.left = Math.max(16, Math.min(window.scrollX + r.right - 280, document.documentElement.clientWidth - 296)) + "px";
   // não deixa o menu sair da tela embaixo
   const mh = m.offsetHeight; if (r.bottom + 4 + mh > window.innerHeight) m.style.top = Math.max(window.scrollY + 8, window.scrollY + r.top - mh - 4) + "px";
   $("#mSave", m).onclick = async () => {
-    const data = {name:$("#mName", m).value.trim() || s.name, kind:$("#mKind", m).value, volume:parseFloat($("#mVol", m).value),
-      folder: $("#mFolder", m).value.trim().slice(0, 40) || null, pan: isYt ? 0 : parseFloat($("#mPan", m).value)};
+    const data = {name:$("#mName", m).value.trim() || s.name, kind, volume:parseFloat($("#mVol", m).value),
+      folder: fp.get() || null, color: color || null, emoji: firstGrapheme($("#mEmoji", m).value) || null};
     if (isYt) { data.yt_start = parseTime($("#mStart", m).value) || null; data.yt_end = parseTime($("#mEnd", m).value) || null; }
     closeMenu();
     const {error} = await sb.from("sounds").update(data).eq("id", s.id);
@@ -503,7 +541,6 @@ function renderGM(){
   visibleSfx = sfx;
   const pv = A.preview?.sid;
   const yt = s => s.source === "youtube" ? '<span class="badge-yt">YT</span>' : "";
-  const sideTag = s => s.source !== "youtube" && Number(s.pan) ? `<span class="badge-side" title="toca no lado ${Number(s.pan) < 0 ? "esquerdo" : "direito"}">${Number(s.pan) < 0 ? "E" : "D"}</span>` : "";
   const star = s => `<button class="icon-btn star ${s.favorite ? "on" : ""}" data-fav="${s.id}" title="${s.favorite ? "Tirar dos favoritos" : "Favoritar"}" aria-label="${s.favorite ? "Tirar dos favoritos" : "Favoritar"} ${esc(s.name)}" aria-pressed="${!!s.favorite}">${s.favorite ? ICON.starOn : ICON.star}</button>`;
   const tools = s => `<span class="tools">${star(s)}<button class="icon-btn" data-prev="${s.id}" title="Pré-ouvir só aqui" aria-label="Pré-ouvir ${esc(s.name)}" style="${pv === s.id ? "color:var(--brass)" : ""}">${ICON.ear}</button><button class="icon-btn" data-menu="${s.id}" title="Editar, mover de pasta ou de tipo" aria-label="Editar ${esc(s.name)}">${ICON.dots}</button></span>`;
   const count = k => k === "" ? sounds.length : k === "__fav" ? sounds.filter(s => s.favorite).length : sounds.filter(s => (s.folder || "") === k).length;
@@ -514,37 +551,36 @@ function renderGM(){
     <button class="btn primary" id="upBtn">${ICON.up} Adicionar sons</button>
     <input class="search" id="search" type="search" placeholder="Buscar som ou pasta…" value="${esc(filter)}" aria-label="Buscar som">
     <span style="flex:1"></span>
-    <div class="sidesel" role="group" aria-label="Lado dos efeitos">
-      <span class="sub">Efeitos saem:</span>
-      <button data-side="-1" aria-pressed="${side === -1}">Esquerda</button>
-      <button data-side="" aria-pressed="${side === null}" title="Usa o lado configurado em cada som">Padrão</button>
-      <button data-side="1" aria-pressed="${side === 1}">Direita</button>
-    </div>
     <label class="sub" style="display:flex;align-items:center;gap:8px">${ICON.vol}<input type="range" id="myVol" min="0" max="1" step="0.05" value="${myVol}" aria-label="Volume só no seu PC"></label>
     <button class="btn danger" id="stopAll">${ICON.hush} Silêncio total</button>
   </div>
   <nav class="folders" aria-label="Pastas">
     ${chip("", "Todas")}${chip("__fav", ICON.starOn + " Favoritos")}${fl.map(n => chip(n, ICON.folder + " " + esc(n))).join("")}
   </nav>
+  ${curFolder && curFolder !== "__fav" ? `<div class="folder-bar" id="folderBar">
+    <span class="sub">Pasta <b>${esc(curFolder)}</b> · ${count(curFolder)} ${count(curFolder) === 1 ? "som" : "sons"}</span>
+    <button class="btn small" id="fRename">Renomear</button>
+    <button class="btn small danger" id="fDelete">Excluir pasta</button>
+  </div>` : ""}
   <div class="board">
     <section class="sec music-sec">
       <div class="sec-head"><span class="swatch"></span><h2>Trilha</h2><span class="hint">uma por vez, em loop</span></div>
       ${music.length ? `<div class="list">${music.map(s => { const on = live.music?.sid === s.id;
-        return `<div class="row ${on ? "active" : ""}"><button class="play" data-music="${s.id}" aria-label="${on ? "Parar" : "Tocar"} ${esc(s.name)}">${on ? ICON.stop : ICON.play}</button>
-        <span class="name">${esc(s.name)}${yt(s)}${sideTag(s)}${on ? '<span class="eq"><i></i><i></i><i></i></span>' : ""}</span><span class="meta">${fmtDur(s.duration)}</span>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhuma trilha aqui." : "Nenhuma trilha ainda. Use “Adicionar sons”."}</div>`}
+        return `<div class="row ${on ? "active" : ""} ${safeColor(s.color) ? "colored" : ""}"${look(s)}><button class="play" data-music="${s.id}" aria-label="${on ? "Parar" : "Tocar"} ${esc(s.name)}">${on ? ICON.stop : ICON.play}</button>
+        <span class="name">${emo(s)}${esc(s.name)}${yt(s)}${on ? '<span class="eq"><i></i><i></i><i></i></span>' : ""}</span><span class="meta">${fmtDur(s.duration)}</span>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhuma trilha aqui." : "Nenhuma trilha ainda. Use “Adicionar sons”."}</div>`}
       ${live.music ? `<div class="live-vol">Volume da trilha <input type="range" id="musicVol" min="0" max="1" step="0.02" value="${live.music.vol ?? .8}"></div>` : ""}
     </section>
     <section class="sec amb-sec">
       <div class="sec-head"><span class="swatch"></span><h2>Ambiente</h2><span class="hint">camadas somam, em loop</span></div>
       ${amb.length ? `<div class="amb-grid">${amb.map(s => { const on = !!live.amb?.[s.id];
-        return `<div class="amb ${on ? "on" : ""}"><button class="toggle" data-amb="${s.id}" aria-pressed="${on}"><span class="sw"></span><span>${esc(s.name)}</span></button>
-        ${on ? `<input type="range" min="0" max="1" step="0.02" value="${live.amb[s.id].vol ?? .7}" data-ambvol="${s.id}" aria-label="Volume de ${esc(s.name)}">` : `<span class="sub">${fmtDur(s.duration) || "&nbsp;"}${yt(s)}${sideTag(s)}</span>`}
+        return `<div class="amb ${on ? "on" : ""} ${safeColor(s.color) ? "colored" : ""}"${look(s)}><button class="toggle" data-amb="${s.id}" aria-pressed="${on}"><span class="sw"></span><span>${emo(s)}${esc(s.name)}</span></button>
+        ${on ? `<input type="range" min="0" max="1" step="0.02" value="${live.amb[s.id].vol ?? .7}" data-ambvol="${s.id}" aria-label="Volume de ${esc(s.name)}">` : `<span class="sub">${fmtDur(s.duration) || "&nbsp;"}${yt(s)}</span>`}
         ${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum ambiente aqui." : "Nenhum ambiente ainda."}</div>`}
     </section>
     <section class="sec sfx-sec">
       <div class="sec-head"><span class="swatch"></span><h2>Efeitos</h2><span class="hint">toca uma vez para todos · atalhos no teclado</span></div>
       ${sfx.length ? `<div class="pads">${sfx.map((s, i) => { const k = KEYS[i];
-        return `<div class="pad-wrap"><button class="pad ${s.favorite ? "fav" : ""}" data-id="${s.id}" data-sfx="${s.id}" style="width:100%">${k ? `<span class="key">${k}</span>` : ""}<span class="pname">${esc(s.name)}${yt(s)}${sideTag(s)}</span></button>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum efeito aqui." : "Nenhum efeito ainda."}</div>`}
+        return `<div class="pad-wrap"><button class="pad ${s.favorite ? "fav" : ""} ${safeColor(s.color) ? "colored" : ""}" data-id="${s.id}" data-sfx="${s.id}"${safeColor(s.color) ? ` style="width:100%;--c:${safeColor(s.color)}"` : ' style="width:100%"'}>${k ? `<span class="key">${k}</span>` : ""}${emo(s, "pemoji")}<span class="pname">${esc(s.name)}${yt(s)}</span></button>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum efeito aqui." : "Nenhum efeito ainda."}</div>`}
     </section>
   </div>`;
   $("#upBtn").onclick = openUpload;
@@ -554,8 +590,31 @@ function renderGM(){
   $("#myVol").oninput = e => setMyVol(parseFloat(e.target.value));
   const mv = $("#musicVol"); if (mv) mv.oninput = e => setLiveVol("music", null, parseFloat(e.target.value));
   v.querySelectorAll("[data-ambvol]").forEach(r => r.oninput = e => setLiveVol("amb", r.dataset.ambvol, parseFloat(e.target.value)));
+  const fr = $("#fRename"), fd = $("#fDelete");
+  if (fr) fr.onclick = () => {
+    const bar = $("#folderBar");
+    bar.innerHTML = `<input type="text" id="fNewName" maxlength="40" class="search" style="max-width:220px" aria-label="Novo nome da pasta"><button class="btn small primary" id="fSave">Salvar</button><button class="btn small" id="fCancel">Cancelar</button>`;
+    const inp = $("#fNewName"); inp.value = curFolder; inp.focus(); inp.select();
+    const save = async () => {
+      const nv = inp.value.trim().slice(0, 40); if (!nv || nv === curFolder) return render();
+      const old = curFolder;
+      const {error} = await sb.from("sounds").update({folder: nv}).eq("folder", old);
+      if (error) return toast("Não renomeei: " + error.message);
+      curFolder = nv; try { localStorage.setItem("mesa.folder", nv); } catch {}
+      toast("Pasta renomeada para “" + nv + "”.");
+    };
+    $("#fSave").onclick = save; inp.onkeydown = e => { if (e.key === "Enter") save(); if (e.key === "Escape") render(); };
+    $("#fCancel").onclick = () => render();
+  };
+  if (fd) fd.onclick = async () => {
+    if (!fd.dataset.arm) { fd.dataset.arm = 1; fd.textContent = "Confirmar: os sons ficam sem pasta"; return; }
+    const old = curFolder;
+    const {error} = await sb.from("sounds").update({folder: null}).eq("folder", old);
+    if (error) return toast("Não excluí a pasta: " + error.message);
+    curFolder = ""; try { localStorage.setItem("mesa.folder", ""); } catch {}
+    toast("Pasta “" + old + "” excluída. Os sons continuam em Todas.");
+  };
   v.querySelectorAll("[data-folder]").forEach(b => b.onclick = () => { curFolder = b.dataset.folder; try { localStorage.setItem("mesa.folder", curFolder); } catch {} render(); });
-  v.querySelectorAll("[data-side]").forEach(b => b.onclick = () => { side = b.dataset.side === "" ? null : Number(b.dataset.side); render(); });
 }
 
 $("#view").addEventListener("click", e => {
@@ -588,8 +647,8 @@ function renderPlayer(){
     $("#myVol").value = myVol;
     $("#myVol").oninput = e => setMyVol(parseFloat(e.target.value));
   }
-  const pm = $("#pMusic"); pm.textContent = m ? m.name : "silêncio"; pm.classList.toggle("none", !m);
-  $("#pAmb").innerHTML = ambs.length ? ambs.map(s => `<span class="chip on"><span class="dot"></span>${esc(s.name)}</span>`).join("") : `<span class="sub">nenhum</span>`;
+  const pm = $("#pMusic"); pm.textContent = m ? (m.emoji ? m.emoji + " " : "") + m.name : "silêncio"; pm.classList.toggle("none", !m);
+  $("#pAmb").innerHTML = ambs.length ? ambs.map(s => `<span class="chip on"><span class="dot"></span>${s.emoji ? esc(s.emoji) + " " : ""}${esc(s.name)}</span>`).join("") : `<span class="sub">nenhum</span>`;
   $("#pSfx").innerHTML = lastSfx ? `Último efeito: <b>${esc(lastSfx)}</b>` : "";
   $("#pHint").textContent = joined ? "Deixe esta aba aberta. O mestre controla o que toca." : "Clique em “Entrar na mesa” para ouvir.";
 }
@@ -657,9 +716,8 @@ async function boot(){
   chan.on("broadcast", {event:"sfx"}, ({payload}) => {
     const s = byId(payload?.sid); if (!s) return;
     const vol = Math.max(0, Math.min(1, Number(payload?.vol ?? 1)));
-    const pan = Math.max(-1, Math.min(1, Number(payload?.pan ?? s.pan ?? 0)));
-    if (joined) A.sfx(s, vol, pan);
-    lastSfx = s.name;
+    if (joined) A.sfx(s, vol);
+    lastSfx = (s.emoji ? s.emoji + " " : "") + s.name;
     if (!isGM) { const f = $("#flash"); if (f) { f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); } renderPlayer(); }
     else flashPad(s.id);
   });

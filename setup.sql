@@ -91,3 +91,7 @@ alter table public.sounds add column if not exists favorite boolean not null def
 alter table public.sounds add column if not exists pan real not null default 0;
 alter table public.sounds add column if not exists yt_start real;
 alter table public.sounds add column if not exists yt_end real;
+
+-- v3: cor e ícone (emoji) de cada botão
+alter table public.sounds add column if not exists color text;
+alter table public.sounds add column if not exists emoji text;

@@ -102,7 +102,7 @@ section.sec{background:var(--bg2);border:1px solid var(--line);border-radius:12p
 .pad-wrap{position:relative;min-width:0}
 
 /* menu */
-.menu{position:absolute;z-index:30;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px;width:240px;box-shadow:0 12px 30px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:8px;font-size:14px}
+.menu{position:absolute;z-index:30;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px;width:280px;box-shadow:0 12px 30px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:8px;font-size:14px}
 .menu label{display:flex;flex-direction:column;gap:4px;color:var(--ink2);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
 .menu input[type=text],.menu select{padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg2);text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)}
 .menu .acts{display:flex;gap:6px;justify-content:space-between}
@@ -188,6 +188,39 @@ img{max-width:100%}
 .pad .pname{padding-right:4px}
 .menu{max-height:calc(100vh - 16px);overflow:auto}
 .amb .tools{position:static;align-self:flex-end;display:flex;margin-top:-4px}
+
+.swatches{display:flex;flex-wrap:wrap;gap:6px;margin-top:-4px}
+.swatch-btn{width:24px;height:24px;border-radius:50%;border:2px solid transparent;padding:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+.swatch-btn.none{background:repeating-linear-gradient(45deg,var(--card),var(--card) 4px,var(--line) 4px,var(--line) 8px)}
+.swatch-btn[aria-checked=true]{border-color:var(--ink);outline:2px solid var(--bg);outline-offset:-4px}
+.emoji-pick{display:grid;grid-template-columns:repeat(9,1fr);gap:2px;margin-top:-4px}
+.emoji-pick button{border:0;background:transparent;font-size:18px;line-height:1;padding:4px 0;border-radius:6px}
+.emoji-pick button:hover{background:rgba(255,255,255,.08)}
+.emoji-pick .clear{font-size:13px;color:var(--ink3)}
+.emo{margin-right:6px}
+.pemoji{font-size:30px;line-height:1;margin-bottom:6px;display:block}
+.pad.colored{border-color:color-mix(in srgb,var(--c) 75%,transparent);background:radial-gradient(circle at 30% 20%,color-mix(in srgb,var(--c) 55%,#2a221b),color-mix(in srgb,var(--c) 22%,#1f1914) 75%)}
+.pad.colored:hover{border-color:var(--c)}
+.row.colored{box-shadow:inset 4px 0 0 var(--c)}
+.row.colored .play{border-color:var(--c)}
+.amb.colored{box-shadow:inset 4px 0 0 var(--c)}
+.amb.colored:not(.on){background:linear-gradient(180deg,color-mix(in srgb,var(--c) 14%,var(--card)),var(--card))}
+.menu input[type=text]{width:100%;min-width:0;box-sizing:border-box}
+.menu label{min-width:0}
+.folder-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-8px 0 18px}
+.folder-bar b{color:var(--ink)}
+/* players do YouTube tocam fora da tela */
+.yt-dock{position:fixed!important;left:-10000px;top:0;width:260px;opacity:0;pointer-events:none}
+.pick{display:flex;flex-wrap:wrap;gap:6px}
+.pbtn{display:inline-flex;align-items:center;gap:5px;padding:7px 11px;border-radius:8px;border:1px solid var(--line);background:var(--card);font-size:13px;font-weight:500;color:var(--ink2);text-transform:none;letter-spacing:0}
+.pbtn svg{width:13px;height:13px}
+.pbtn:hover{background:var(--card2);color:var(--ink)}
+.pbtn[aria-pressed=true]{border-color:var(--brass);background:#3a2f1f;color:var(--ink)}
+.pbtn.new{border-style:dashed}
+.newf{display:inline-flex;gap:6px;align-items:center}
+.newf input{width:140px;padding:7px 9px;border-radius:8px;border:1px solid var(--brass);background:var(--bg2);color:var(--ink);font-size:13px}
+.menu .pick{margin-top:-4px}
+.drop{display:block}
 </style>
 
 </head>
