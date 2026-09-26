@@ -95,3 +95,18 @@ alter table public.sounds add column if not exists yt_end real;
 -- v3: cor e ícone (emoji) de cada botão
 alter table public.sounds add column if not exists color text;
 alter table public.sounds add column if not exists emoji text;
+
+-- v4: cor das pastas
+create table if not exists public.folders (
+  name text primary key,
+  color text,
+  created_at timestamptz default now()
+);
+alter table public.folders enable row level security;
+drop policy if exists "todos leem pastas" on public.folders;
+drop policy if exists "mestre edita pastas" on public.folders;
+create policy "todos leem pastas" on public.folders for select using (true);
+create policy "mestre edita pastas" on public.folders for all to authenticated using (true) with check (true);
+do $$ begin
+  begin alter publication supabase_realtime add table public.folders; exception when duplicate_object then null; end;
+end $$;

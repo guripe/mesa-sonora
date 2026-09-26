@@ -25,6 +25,7 @@ let peers = [];
 let joined = false;
 let filter = "";
 let lastSfx = null;
+let folderColors = {};    // nome da pasta -> cor
 let curFolder = "";       // "" todas, "__fav" favoritos, ou nome da pasta
 let visibleSfx = [];
 let myVol = 0.85, nick = "";
@@ -216,9 +217,24 @@ const A = {
     const v = this.ytPool.get(s.id);
     if (v && v.fire(vol)) return;
     // ainda carregando: toca num player avulso
-    this.ytVoice(s, vol, null, {mode:"once"});
+    const o = this.ytVoice(s, vol, null, {mode:"once"});
+    this.ytOnce.set(s.id, o);
+    const kill = o.destroy; o.destroy = () => { if (this.ytOnce.get(s.id) === o) this.ytOnce.delete(s.id); kill(); };
   },
-  stopYtSfx(){ for (const v of this.ytPool.values()) v.pause(); },
+  ytOnce: new Map(),
+  stopYtSfx(){ for (const v of this.ytPool.values()) v.pause(); for (const o of [...this.ytOnce.values()]) o.destroy(); },
+  // efeito tocando agora?
+  sfxPlaying(sid){
+    for (const src of this.sfxLive) if (src.sid === sid) return true;
+    const v = this.ytPool.get(sid);
+    if (v?.ready) { try { const st = v.player.getPlayerState(); if (st === 1 || st === 3) return true; } catch {} }
+    return this.ytOnce.has(sid);
+  },
+  stopSfxOne(sid){
+    for (const src of [...this.sfxLive]) if (src.sid === sid) { try { src.stop(); } catch {} this.sfxLive.delete(src); }
+    this.ytPool.get(sid)?.pause();
+    const o = this.ytOnce.get(sid); if (o) o.destroy();
+  },
 
   voice(s, vol, at){ return s.source === "youtube" ? this.ytVoice(s, vol, at) : this.fileVoice(s, vol, at); },
 
@@ -257,6 +273,7 @@ const A = {
       const pn = this.panNode(pan ?? s.pan);
       if (pn) src.connect(g).connect(pn).connect(this.master); else src.connect(g).connect(this.master);
       src.start();
+      src.sid = s.id;
       this.sfxLive.add(src); src.onended = () => this.sfxLive.delete(src);
     } catch { toast("Não consegui tocar “" + s.name + "”."); }
   },
@@ -298,7 +315,14 @@ function setLiveVol(kind, sid, v){
   clearTimeout(volTimer); volTimer = setTimeout(() => saveLive(live), 350);
 }
 function fireSfx(s){
-  A.init(); flashPad(s.id);
+  A.init();
+  // clicou de novo enquanto toca: para o efeito para todos
+  if (A.sfxPlaying(s.id)) {
+    A.stopSfxOne(s.id);
+    chan?.send({type:"broadcast", event:"sfxstop", payload:{sid:s.id}});
+    return;
+  }
+  flashPad(s.id);
   A.sfx(s, s.volume ?? 1);
   chan?.send({type:"broadcast", event:"sfx", payload:{sid:s.id, vol:s.volume ?? 1}});
 }
@@ -544,7 +568,7 @@ function renderGM(){
   const star = s => `<button class="icon-btn star ${s.favorite ? "on" : ""}" data-fav="${s.id}" title="${s.favorite ? "Tirar dos favoritos" : "Favoritar"}" aria-label="${s.favorite ? "Tirar dos favoritos" : "Favoritar"} ${esc(s.name)}" aria-pressed="${!!s.favorite}">${s.favorite ? ICON.starOn : ICON.star}</button>`;
   const tools = s => `<span class="tools">${star(s)}<button class="icon-btn" data-prev="${s.id}" title="Pré-ouvir só aqui" aria-label="Pré-ouvir ${esc(s.name)}" style="${pv === s.id ? "color:var(--brass)" : ""}">${ICON.ear}</button><button class="icon-btn" data-menu="${s.id}" title="Editar, mover de pasta ou de tipo" aria-label="Editar ${esc(s.name)}">${ICON.dots}</button></span>`;
   const count = k => k === "" ? sounds.length : k === "__fav" ? sounds.filter(s => s.favorite).length : sounds.filter(s => (s.folder || "") === k).length;
-  const chip = (k, label) => `<button class="fchip" data-folder="${esc(k)}" aria-pressed="${curFolder === k}">${label} <span>${count(k)}</span></button>`;
+  const chip = (k, label) => { const fc = safeColor(folderColors[k]); return `<button class="fchip ${fc ? "colored" : ""}" data-folder="${esc(k)}" aria-pressed="${curFolder === k}"${fc ? ` style="--c:${fc}"` : ""}>${label} <span>${count(k)}</span></button>`; };
   const keep = document.activeElement?.id;
   v.innerHTML = `
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
@@ -561,6 +585,8 @@ function renderGM(){
     <span class="sub">Pasta <b>${esc(curFolder)}</b> · ${count(curFolder)} ${count(curFolder) === 1 ? "som" : "sons"}</span>
     <button class="btn small" id="fRename">Renomear</button>
     <button class="btn small danger" id="fDelete">Excluir pasta</button>
+    <span class="sub" style="margin-left:6px">Cor:</span>
+    <span class="swatches" id="fColors" role="radiogroup" aria-label="Cor da pasta" style="margin:0">${COLORS.map(([c, n]) => `<button type="button" role="radio" class="swatch-btn ${c ? "" : "none"}" data-fcolor="${c}" title="${n}" aria-label="${n}" aria-checked="${(safeColor(folderColors[curFolder]) || "") === c}" style="${c ? "background:" + c : ""}"></button>`).join("")}</span>
   </div>` : ""}
   <div class="board">
     <section class="sec music-sec">
@@ -600,6 +626,7 @@ function renderGM(){
       const old = curFolder;
       const {error} = await sb.from("sounds").update({folder: nv}).eq("folder", old);
       if (error) return toast("Não renomeei: " + error.message);
+      if (folderColors[old]) { await sb.from("folders").upsert({name: nv, color: folderColors[old]}); await sb.from("folders").delete().eq("name", old); }
       curFolder = nv; try { localStorage.setItem("mesa.folder", nv); } catch {}
       toast("Pasta renomeada para “" + nv + "”.");
     };
@@ -611,8 +638,17 @@ function renderGM(){
     const old = curFolder;
     const {error} = await sb.from("sounds").update({folder: null}).eq("folder", old);
     if (error) return toast("Não excluí a pasta: " + error.message);
+    await sb.from("folders").delete().eq("name", old);
     curFolder = ""; try { localStorage.setItem("mesa.folder", ""); } catch {}
     toast("Pasta “" + old + "” excluída. Os sons continuam em Todas.");
+  };
+  const fcs = $("#fColors");
+  if (fcs) fcs.onclick = async e => {
+    const b = e.target.closest("[data-fcolor]"); if (!b) return;
+    const color = b.dataset.fcolor || null, name = curFolder;
+    folderColors = {...folderColors, [name]: color}; render();
+    const {error} = color ? await sb.from("folders").upsert({name, color}) : await sb.from("folders").delete().eq("name", name);
+    if (error) toast("Não salvei a cor: " + error.message);
   };
   v.querySelectorAll("[data-folder]").forEach(b => b.onclick = () => { curFolder = b.dataset.folder; try { localStorage.setItem("mesa.folder", curFolder); } catch {} render(); });
 }
@@ -683,6 +719,11 @@ async function loadSounds(){
   if (error) { toast("Não carreguei os sons: " + error.message); return; }
   sounds = data; if (joined) { A.sync(); A.preloadSfx(); } render();
 }
+async function loadFolders(){
+  const {data, error} = await sb.from("folders").select("name,color");
+  if (error) return; // tabela ainda não existe: segue sem cores
+  folderColors = Object.fromEntries(data.map(f => [f.name, f.color])); render();
+}
 async function loadLive(){
   const {data} = await sb.from("live_state").select("*").eq("id", 1).maybeSingle();
   live = {music:data?.music || null, amb:data?.amb || {}}; A.sync(); render();
@@ -704,9 +745,10 @@ async function boot(){
   applySession(s0);
   sb.auth.onAuthStateChange((_ev, s) => { if (!!s !== isGM) applySession(s); });
 
-  await Promise.all([loadSounds(), loadLive()]);
+  await Promise.all([loadSounds(), loadLive(), loadFolders()]);
 
   sb.channel("db").on("postgres_changes", {event:"*", schema:"public", table:"sounds"}, () => loadSounds())
+    .on("postgres_changes", {event:"*", schema:"public", table:"folders"}, () => loadFolders())
     .on("postgres_changes", {event:"*", schema:"public", table:"live_state"}, p => {
       const d = p.new; if (!d || d.id !== 1) return;
       live = {music:d.music || null, amb:d.amb || {}}; A.sync(); render();
@@ -722,6 +764,12 @@ async function boot(){
     else flashPad(s.id);
   });
   chan.on("broadcast", {event:"hush"}, () => A.stopSfx());
+  chan.on("broadcast", {event:"sfxstop"}, ({payload}) => { if (payload?.sid) A.stopSfxOne(payload.sid); });
+  // marca os botões de efeito que estão tocando
+  setInterval(() => {
+    if (!isGM) return;
+    document.querySelectorAll(".pad[data-id]").forEach(el => el.classList.toggle("playing", A.sfxPlaying(el.dataset.id)));
+  }, 250);
   chan.on("presence", {event:"sync"}, () => {
     const st = chan.presenceState();
     peers = Object.entries(st).map(([k, arr]) => ({...(arr[arr.length-1] || {}), me: k === myKey}));
