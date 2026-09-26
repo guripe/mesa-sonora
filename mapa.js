@@ -115,19 +115,36 @@ function getImg(url){
 let selBarKey = "";
 function selBar(){
   const t = tokens.find(x => x.id === selTok), can = t && (isGM || owns(t));
-  const key = can ? [t.id, t.n, t.h, isGM].join("|") : "";
+  const key = can ? [t.id, t.n, t.h, isGM, JSON.stringify(t.b || [])].join("|") : "";
   if (key === selBarKey) return; selBarKey = key;
   let el = $("#selbar"); if (!el) { el = document.createElement("div"); el.id = "selbar"; el.className = "selbar"; document.body.appendChild(el); }
   if (!can) { el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = `<b>${esc(t.n || "Token")}</b>
+  const bars = (t.b || []).map((b, i) => ({...b, i})).filter(b => b.v !== "" && b.v != null || (b.m !== "" && b.m != null));
+  const barUI = bars.map(b => `<span class="sbbar" style="--bc:${esc(b.c || "#c0473a")}"><i></i>
+      <button class="btn small" data-hp="${b.i}" data-d="-10">−10</button><button class="btn small" data-hp="${b.i}" data-d="-1">−1</button>
+      <input class="sbv" data-hpv="${b.i}" value="${esc(b.v)}" inputmode="numeric" aria-label="Valor da barrinha ${b.i + 1}">${b.m !== "" && b.m != null ? `<em>/ ${esc(b.m)}</em>` : ""}
+      <button class="btn small" data-hp="${b.i}" data-d="1">+1</button><button class="btn small" data-hp="${b.i}" data-d="10">+10</button></span>`).join("");
+  el.innerHTML = `<div class="sbrow"><b>${esc(t.n || "Token")}</b>
     ${isGM ? `<button class="btn small" data-sb="edit">✎ Editar</button>` : ""}
     <button class="btn small" data-sb="l" title="Girar (Q)" aria-label="Girar para a esquerda">↺</button><button class="btn small" data-sb="r" title="Girar (E)" aria-label="Girar para a direita">↻</button>
-    ${isGM ? `<button class="btn small" data-sb="hide">${t.h ? "👁 Mostrar aos jogadores" : "🚫 Ocultar"}</button><button class="btn small danger" data-sb="del">Remover</button>` : ""}`;
+    ${isGM ? `<button class="btn small" data-sb="hide">${t.h ? "👁 Mostrar aos jogadores" : "🚫 Ocultar"}</button><button class="btn small danger" data-sb="del">Remover</button>` : ""}</div>
+    ${barUI ? `<div class="sbrow">${barUI}</div>` : ""}`;
+  const setHP = (i, v) => {
+    const cur = tokens.find(x => x.id === selTok); if (!cur?.b?.[i]) return;
+    v = Math.round(v); cur.b[i].v = v; dirty = true; selBarKey = "";
+    if (isGM) save("tokens"); else send("tokreq", {id: cur.id, bi: i, bv: v, who: myNick});
+  };
+  el.querySelectorAll("[data-hpv]").forEach(inp => {
+    inp.onkeydown = e => { if (e.key === "Enter") inp.blur(); e.stopPropagation(); };
+    inp.onchange = () => { const raw = inp.value.trim().replace(",", "."); const cur = tokens.find(x => x.id === selTok); const old = +cur?.b?.[inp.dataset.hpv]?.v || 0;
+      const v = /^[+-]/.test(raw) ? old + (+raw) : +raw; if (isFinite(v) && raw !== "") setHP(+inp.dataset.hpv, v); else selBarKey = ""; };
+  });
   el.onclick = e => {
-    const b = e.target.closest("[data-sb]"); if (!b) return;
+    const b = e.target.closest("[data-sb],[data-hp]"); if (!b) return;
     const cur = tokens.find(x => x.id === selTok); if (!cur) return;
     const a = b.dataset.sb;
+    if (b.dataset.hp != null) { const i = +b.dataset.hp; return setHP(i, (+cur.b[i].v || 0) + +b.dataset.d); }
     if (a === "edit") openTokenPanel(cur);
     else if (a === "l" || a === "r") rotateSel(a === "l" ? -1 : 1);
     else if (a === "hide") { cur.h = !cur.h; save("tokens"); dirty = true; toast(cur.h ? "Token oculto dos jogadores." : "Token visível para os jogadores."); }
@@ -269,10 +286,12 @@ function paintToken(t){
   } else { ctx.fillStyle = "#1a130b"; ctx.font = `700 ${r * .8}px "Alegreya Sans", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText((t.n || "?").trim().slice(0, 2).toUpperCase(), t.x, t.y + r * .04); }
   ctx.lineWidth = Math.max(2, r * .1); ctx.strokeStyle = selTok === t.id ? "#fff" : "rgba(0,0,0,.55)"; ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2); ctx.stroke();
   const vv = VI(t), ll = LI(t);
-  if (t.dir === "arrow" || (t.dir !== "rotate" && ((vv && vv.ang < 360) || (ll && ll.ang < 360)))) { // seta de direção
+  const selMine = selTok === t.id && (isGM || owns(t));
+  if (selMine || t.dir === "arrow" || (t.dir !== "rotate" && ((vv && vv.ang < 360) || (ll && ll.ang < 360)))) { // seta de direção (arraste para girar)
     const [vx, vy] = dirVec(ang), px = -vy, py = vx, tip = r * 1.32, base = r * 1.02, w = r * .28;
     ctx.beginPath(); ctx.moveTo(t.x + vx * tip, t.y + vy * tip); ctx.lineTo(t.x + vx * base + px * w, t.y + vy * base + py * w); ctx.lineTo(t.x + vx * base - px * w, t.y + vy * base - py * w); ctx.closePath();
     ctx.fillStyle = selTok === t.id ? "#fff" : (t.c || "#d0a54c"); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = Math.max(1, r * .05); ctx.stroke();
+    if (selMine) { ctx.beginPath(); ctx.arc(t.x + vx * r * 1.2, t.y + vy * r * 1.2, Math.max(r * .3, 9 / cam.z), 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.setLineDash([3 / cam.z, 3 / cam.z]); ctx.lineWidth = 1.5 / cam.z; ctx.stroke(); ctx.setLineDash([]); }
   }
   // barrinhas
   const bars = (t.b || []).filter(b => b && b.v !== "" && b.v != null);
@@ -491,6 +510,11 @@ cv.addEventListener("pointerdown", e => {
   if (tool === "move") {
     const t = hitToken(wx, wy);
     if (!t && isGM) { const wi = wallAt(wx, wy); const w = walls()[wi]; if (w?.d) { w.o = w.o ? 0 : 1; wallsChanged(); toast(w.o ? "Porta aberta." : "Porta fechada."); return; } }
+    const sel = tokens.find(x => x.id === selTok);
+    if (sel && (isGM || owns(sel))) { // pegou na setinha do token selecionado?
+      const r = tokR(sel), [vx, vy] = dirVec(sel.a || 0), hx = sel.x + vx * r * 1.2, hy = sel.y + vy * r * 1.2;
+      if (Math.hypot(wx - hx, wy - hy) <= Math.max(r * .38, 12 / cam.z)) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; }
+    }
     if (t && (isGM || owns(t))) { selTok = t.id; drag = {kind: "token", t, dx: t.x - wx, dy: t.y - wy, moved: false}; dirty = true; return; }
     selTok = null; dirty = true;
     drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return;
@@ -521,6 +545,12 @@ cv.addEventListener("pointermove", e => {
   }
   if (drag.kind === "pinch" && pts.size === 2) { const [p1, p2] = [...pts.values()]; const d = Math.hypot(p1[0] - p2[0], p1[1] - p2[1]); zoomAt((drag.z * d / drag.d) / cam.z, (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2); return; }
   if (drag.kind === "pan") { cam.x = drag.cx + e.clientX - drag.sx; cam.y = drag.cy + e.clientY - drag.sy; dirty = true; return; }
+  if (drag.kind === "rotate") {
+    let a = Math.atan2(wx - drag.t.x, -(wy - drag.t.y)) * 180 / Math.PI;
+    const step = e.shiftKey ? (G().type === "hex" ? 60 : 45) : 5; a = ((Math.round(a / step) * step) % 360 + 360) % 360;
+    if (a !== drag.t.a) { drag.t.a = a; drag.moved = true; dirty = true; sendTok(drag.t); }
+    return;
+  }
   if (drag.kind === "token") { drag.t.x = wx + drag.dx; drag.t.y = wy + drag.dy; drag.moved = true; dirty = true; sendTok(drag.t); return; }
   if (drag.kind === "ruler") { rulers[myKey].b = snapPoint(wx, wy); dirty = true; sendRuler(); return; }
   if (drag.kind === "draw") { const p = [Math.round(wx), Math.round(wy)], s = drag.shape; if (s.t === "pen") { const l = s.p[s.p.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 2 / cam.z) s.p.push(p); } else s.p[1] = p; dirty = true; return; }
@@ -533,6 +563,10 @@ function endPointer(e){
   if (!drag) return;
   const d = drag; drag = null;
   if (d.kind === "pinch") return;
+  if (d.kind === "rotate") {
+    if (d.moved) { const t = d.t; delete tokLive[t.id]; if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else send("tokreq", {id: t.id, a: t.a, who: myNick}); }
+    return;
+  }
   if (d.kind === "token") {
     if (d.moved) {
       const [x, y] = d.t.sn === false ? [Math.round(d.t.x), Math.round(d.t.y)] : snapPoint(d.t.x, d.t.y, d.t.s || 1); d.t.x = x; d.t.y = y; delete tokLive[d.t.id];
@@ -602,7 +636,7 @@ function fogRect(p, q){
 // ---------- rede ----------
 let tokT = 0;
 function send(event, payload){ chan?.send({type: "broadcast", event, payload}); }
-function sendTok(t){ const now = performance.now(); if (now - tokT < 45) return; tokT = now; send("tok", {id: t.id, x: Math.round(t.x), y: Math.round(t.y), live: 1}); }
+function sendTok(t){ const now = performance.now(); if (now - tokT < 45) return; tokT = now; send("tok", {id: t.id, x: Math.round(t.x), y: Math.round(t.y), a: t.a || 0, live: 1}); }
 let rulerT = 0, rulerPending = null;
 function sendRuler(){
   const now = performance.now(); clearTimeout(rulerPending);
@@ -917,6 +951,80 @@ function askNick(){
   });
 }
 
+
+// ---------- dados (mestre e jogadores) ----------
+const DICE = [4, 6, 8, 10, 12, 20];
+const DIE_SHAPE = {4: "polygon(50% 4%, 97% 90%, 3% 90%)", 6: "polygon(8% 8%, 92% 8%, 92% 92%, 8% 92%)", 8: "polygon(50% 2%, 96% 50%, 50% 98%, 4% 50%)",
+  10: "polygon(50% 2%, 97% 40%, 80% 90%, 20% 90%, 3% 40%)", 12: "polygon(50% 2%, 90% 22%, 98% 65%, 72% 97%, 28% 97%, 2% 65%, 10% 22%)", 20: "polygon(50% 1%, 94% 25%, 94% 75%, 50% 99%, 6% 75%, 6% 25%)"};
+const DIE_COLOR = {4: "#6a8f4e", 6: "#b8872f", 8: "#4a72b8", 10: "#8a5bb0", 12: "#b0563d", 20: "#c9a227"};
+let diceCounts = (() => { try { return JSON.parse(localStorage.getItem("mesa.dice")) || {}; } catch { return {}; } })();
+let diceMod = 0, diceSecret = false, diceLog = [], diceOpen = false;
+const dieEl = (d, v, cls = "") => `<span class="die d${d} ${cls}" style="--dc:${DIE_COLOR[d]};--shape:${DIE_SHAPE[d]}"><span class="die-n">${v}</span></span>`;
+function diceFormula(){ let f = [...DICE].reverse().filter(d => diceCounts[d] > 0).map(d => `${diceCounts[d]}d${d}`).join(" + "); if (diceMod) f += (diceMod > 0 ? " + " : " − ") + Math.abs(diceMod); return f; }
+const DS = { ctx: null,
+  init(){ if (!this.ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return false; this.ctx = new C(); } if (this.ctx.state === "suspended") this.ctx.resume(); return true; },
+  click(t, f, v, len){ const c = this.ctx, b = c.createBuffer(1, Math.ceil(c.sampleRate * len), c.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = c.createBufferSource(), bp = c.createBiquadFilter(), g = c.createGain(); s.buffer = b; bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = 6; g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.001, t + len); s.connect(bp).connect(g).connect(c.destination); s.start(t); },
+  tone(t, f, len, v, type = "triangle"){ const c = this.ctx, o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .01); g.gain.exponentialRampToValueAtTime(.001, t + len); o.connect(g).connect(c.destination); o.start(t); o.stop(t + len + .05); },
+  rattle(n){ if (!this.init()) return; const t0 = this.ctx.currentTime; for (let i = 0; i < 12 + n * 6; i++) { const x = Math.pow(Math.random(), 1.6) * .8; this.click(t0 + x, 1800 + Math.random() * 3000, .18 * (1 - x), .02); } },
+  crit(){ if (!this.init()) return; const t = this.ctx.currentTime + .05; [523, 659, 784, 1047].forEach((f, i) => this.tone(t + i * .09, f, .5, .12, "square")); },
+  fumble(){ if (!this.init()) return; const t = this.ctx.currentTime + .05; [311, 294, 277, 262].forEach((f, i) => this.tone(t + i * .3, f, i === 3 ? .9 : .3, .15, "sawtooth")); },
+};
+function drawDiceDock(){
+  let el = $("#diceDock"); if (!el) { el = document.createElement("div"); el.id = "diceDock"; el.className = "dice-dock"; document.body.appendChild(el); }
+  const any = DICE.some(d => diceCounts[d] > 0);
+  el.innerHTML = `<div class="dlog" id="dLog" aria-live="polite">${diceLog.slice(-6).map(logRow).join("")}</div>
+    ${diceOpen ? `<div class="dpanel">
+      <div class="dmenu">${DICE.map(d => { const n = diceCounts[d] || 0; return `<button class="dpick ${n ? "on" : ""}" data-dp="${d}" title="Adicionar d${d} (botão direito tira)">${dieEl(d, "d" + d, "mini")}${n ? `<span class="dbadge">${n}</span>` : ""}</button>`; }).join("")}</div>
+      <div class="drow"><span>Bônus</span><button class="btn small" data-dm="-1">−</button><b>${diceMod > 0 ? "+" + diceMod : diceMod}</b><button class="btn small" data-dm="1">+</button>
+        <span class="dform">${any ? esc(diceFormula()) : "escolha os dados"}</span></div>
+      <div class="drow">${isGM ? `<label class="chk"><input type="checkbox" id="dSecret" ${diceSecret ? "checked" : ""}> Secreta (só você vê)</label>` : ""}<span class="spacer"></span>
+        <button class="btn small" id="dClear" ${any || diceMod ? "" : "disabled"}>Limpar</button><button class="btn small primary" id="dRoll" ${any ? "" : "disabled"}>🎲 Rolar</button></div>
+    </div>` : ""}
+    <button class="btn dice-toggle" id="dToggle" aria-expanded="${diceOpen}">🎲 Dados</button>`;
+  $("#dToggle").onclick = () => { diceOpen = !diceOpen; drawDiceDock(); };
+  if (!diceOpen) return;
+  const pnl = el.querySelector(".dpanel");
+  pnl.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.dp) { const d = +b.dataset.dp; diceCounts[d] = Math.min(20, (diceCounts[d] || 0) + 1); }
+    else if (b.dataset.dm) diceMod = Math.max(-30, Math.min(30, diceMod + +b.dataset.dm));
+    else if (b.id === "dClear") { diceCounts = {}; diceMod = 0; }
+    else if (b.id === "dRoll") return rollDice();
+    try { localStorage.setItem("mesa.dice", JSON.stringify(diceCounts)); } catch {}
+    drawDiceDock();
+  };
+  pnl.oncontextmenu = e => { const b = e.target.closest("[data-dp]"); if (!b) return; e.preventDefault(); const d = +b.dataset.dp; diceCounts[d] = Math.max(0, (diceCounts[d] || 0) - 1); drawDiceDock(); };
+  const sc = $("#dSecret"); if (sc) sc.onchange = e => { diceSecret = e.target.checked; };
+}
+function logRow(r){
+  const nat = r.dice.some(x => x.d === 20 && x.v === 20) ? "crit" : r.dice.some(x => x.d === 20 && x.v === 1) ? "fumble" : "";
+  return `<div class="droll ${nat} ${r.fresh ? "fresh" : ""} ${r.secret ? "secret" : ""}" data-rid="${r.id}">
+    <div class="dwho">${esc(r.who)}${r.secret ? " · secreta" : ""}<span>${esc(r.f)}</span></div>
+    <div class="dfaces">${r.dice.map(x => dieEl(x.d, r.fresh ? "?" : x.v, "mini" + (x.d === 20 && (x.v === 20 || x.v === 1) && !r.fresh ? (x.v === 20 ? " c20" : " c1") : ""))).join("")}${r.mod ? `<span class="dmod">${r.mod > 0 ? "+" : "−"}${Math.abs(r.mod)}</span>` : ""}</div>
+    <div class="dtot">${r.fresh ? "…" : r.total}</div>
+    ${!r.fresh && nat === "crit" ? '<div class="dtag">⚔️ CRÍTICO!</div>' : ""}${!r.fresh && nat === "fumble" ? '<div class="dtag">💀 FALHA CRÍTICA</div>' : ""}</div>`;
+}
+function addRoll(r){
+  r.fresh = true; diceLog.push(r); if (diceLog.length > 40) diceLog.shift(); drawDiceDock();
+  DS.rattle(r.dice.length);
+  const el = document.querySelector(`[data-rid="${r.id}"]`), t0 = performance.now();
+  const spin = () => {
+    const row = document.querySelector(`[data-rid="${r.id}"]`); if (!row) return;
+    if (performance.now() - t0 < 700) { row.querySelectorAll(".die-n").forEach((n, i) => { if (r.dice[i]) n.textContent = 1 + Math.floor(Math.random() * r.dice[i].d); }); return requestAnimationFrame(spin); }
+    r.fresh = false; drawDiceDock();
+    if (r.dice.some(x => x.d === 20 && x.v === 20)) DS.crit(); else if (r.dice.some(x => x.d === 20 && x.v === 1)) DS.fumble();
+  };
+  if (el) requestAnimationFrame(spin);
+}
+function rollDice(){
+  const dice = [];
+  for (const d of [...DICE].reverse()) for (let i = 0; i < (diceCounts[d] || 0); i++) dice.push({d, v: 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * d)});
+  if (!dice.length) return;
+  const r = {id: uid(), who: isGM ? "Mestre" : (myNick || "Jogador"), f: diceFormula(), dice, mod: diceMod, total: dice.reduce((a, x) => a + x.v, 0) + diceMod, secret: isGM && diceSecret};
+  if (!r.secret) send("roll", r);
+  addRoll(r);
+}
+
 // ---------- início ----------
 async function boot(){
   let cfg;
@@ -936,7 +1044,7 @@ async function boot(){
   chan = sb.channel("mapa", {config: {broadcast: {self: false}, presence: {key: myKey}}});
   chan.on("broadcast", {event: "tok"}, ({payload: p}) => {
     if (!p?.id) return;
-    if (p.live) tokLive[p.id] = {x: p.x, y: p.y};
+    if (p.live) tokLive[p.id] = p.a != null ? {x: p.x, y: p.y, a: p.a} : {x: p.x, y: p.y};
     else { delete tokLive[p.id]; const t = tokens.find(x => x.id === p.id); if (t) { t.x = p.x; t.y = p.y; if (p.a != null) t.a = p.a; } }
     dirty = true;
   });
@@ -946,6 +1054,7 @@ async function boot(){
     if (t.o !== "*" && String(p.who || "").toLowerCase() !== t.o.toLowerCase()) return;
     if (p.x != null) { const [x, y] = t.sn === false ? [Math.round(p.x), Math.round(p.y)] : snapPoint(p.x, p.y, t.s || 1); t.x = x; t.y = y; }
     if (p.a != null) t.a = ((+p.a % 360) + 360) % 360;
+    if (p.bi != null && t.b?.[p.bi] && isFinite(+p.bv)) t.b[p.bi].v = Math.round(+p.bv);
     delete tokLive[t.id]; send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); dirty = true;
   });
   chan.on("presence", {event: "sync"}, () => {
@@ -955,8 +1064,10 @@ async function boot(){
   chan.on("broadcast", {event: "ruler"}, ({payload: p}) => { if (!p?.k) return; if (p.r) rulers[p.k] = p.r; else delete rulers[p.k]; dirty = true; });
   chan.on("broadcast", {event: "state"}, ({payload: p}) => { if (!isGM && p?.col) apply({[p.col]: p.val}); });
   if (!isGM) setInterval(load, 20000);                 // rede de segurança
+  chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (r?.id && Array.isArray(r.dice)) addRoll({...r, dice: r.dice.slice(0, 60).filter(x => DICE.includes(x.d)), secret: false}); });
   chan.on("broadcast", {event: "view"}, ({payload: p}) => { if (!isGM && p) { centerOn(p.x, p.y, p.z); toast("O mestre levou você para esta parte do mapa."); } });
   chan.subscribe(st => { if (st === "SUBSCRIBED") chan.track({name: isGM ? "Mestre" : myNick, role: isGM ? "gm" : "player"}); $("#status").textContent = st === "SUBSCRIBED" ? (isGM ? "ao vivo · jogadores veem o que você fizer" : "ao vivo") : "reconectando…"; });
+  drawDiceDock();
   requestAnimationFrame(frame);
 }
 boot();

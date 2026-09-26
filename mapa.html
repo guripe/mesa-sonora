@@ -120,6 +120,55 @@ input[type=range]{accent-color:var(--brass);width:100%}
 .tlname{flex:1;min-width:0;text-align:left;background:none;border:0;padding:6px 2px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tlname em{font-style:normal;color:#e0735e;font-size:12px}
 .tlname small{color:var(--ink3)}
+
+/* v10: vida no token e dados */
+.selbar{flex-direction:column;align-items:stretch}
+.sbrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center}
+.sbbar{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border-radius:9px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
+.sbbar i{width:10px;height:10px;border-radius:3px;background:var(--bc);margin-right:2px}
+.sbbar .btn.small{padding:4px 7px;font-weight:700;font-variant-numeric:tabular-nums}
+.sbv{width:54px;text-align:center;background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:4px 4px;font-weight:700;color:var(--ink)}
+.sbbar em{font-style:normal;color:var(--ink3);font-size:13px}
+.dice-dock{position:fixed;left:10px;bottom:10px;z-index:8;display:flex;flex-direction:column;align-items:flex-start;gap:8px;max-width:min(340px,calc(100vw - 20px));pointer-events:none}
+.dice-dock > *{pointer-events:auto}
+.dice-toggle{font-weight:700;color:var(--brass);border-color:color-mix(in srgb,var(--brass) 55%,var(--line))}
+.dpanel{background:rgba(31,25,20,.97);border:1px solid var(--line);border-radius:12px;padding:10px;width:100%;box-shadow:0 12px 28px rgba(0,0,0,.45)}
+.dmenu{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:8px}
+.dpick{position:relative;border:1px solid var(--line);background:var(--card);border-radius:9px;padding:6px 0;display:grid;place-items:center}
+.dpick.on{border-color:var(--brass)}
+.dpick:hover{background:var(--card2)}
+.dbadge{position:absolute;top:-6px;right:-5px;min-width:18px;padding:1px 5px;border-radius:999px;background:var(--brass);color:var(--brass-ink);font:700 11px/1.2 var(--body)}
+.drow{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;font-size:13px;color:var(--ink2)}
+.drow b{min-width:26px;text-align:center;color:var(--ink)}
+.drow .spacer{flex:1}
+.dform{margin-left:auto;font-weight:700;color:var(--ink)}
+.die{position:relative;display:inline-grid;place-items:center;width:30px;height:30px}
+.die::before{content:"";position:absolute;inset:0;clip-path:var(--shape);background:radial-gradient(circle at 35% 28%,color-mix(in srgb,var(--dc) 60%,#fff),var(--dc) 45%,color-mix(in srgb,var(--dc) 55%,#000))}
+.die-n{position:relative;font:700 11px/1 var(--body);color:#1a130b}
+.die.d4 .die-n{transform:translateY(22%)}
+.die.mini{width:28px;height:28px}
+.die.mini .die-n{font-size:11px}
+.die.c20::before{background:radial-gradient(circle at 35% 28%,#fff6c8,#e8c14a 45%,#8a6a12)}
+.die.c20{filter:drop-shadow(0 0 8px rgba(240,200,80,.9))}
+.die.c1::before{background:radial-gradient(circle at 35% 28%,#e8a79b,#9c3526 50%,#4a140c)}
+.dlog{display:flex;flex-direction:column;gap:6px;width:100%;max-height:46vh;overflow:auto}
+.droll{position:relative;display:grid;grid-template-columns:1fr auto;grid-template-areas:"who tot" "faces tot" "tag tag";gap:2px 10px;background:rgba(23,19,15,.93);border:1px solid var(--line);border-radius:10px;padding:7px 10px;box-shadow:0 8px 20px rgba(0,0,0,.35);animation:dIn .25s ease-out}
+.droll.secret{border-style:dashed}
+.droll.crit{border-color:#e8c14a;box-shadow:0 0 18px rgba(232,193,74,.45)}
+.droll.fumble{border-color:#9c3526;box-shadow:0 0 18px rgba(156,53,38,.45)}
+.dwho{grid-area:who;font-weight:700;color:var(--ink);font-size:14px}
+.dwho span{font-weight:500;color:var(--ink3);margin-left:6px;font-size:12px}
+.dfaces{grid-area:faces;display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.droll.fresh .die{animation:dShake .12s linear infinite}
+.dmod{font-weight:700;color:var(--ink2);margin-left:4px}
+.dtot{grid-area:tot;align-self:center;font:700 30px/1 var(--display);color:var(--brass);min-width:34px;text-align:right}
+.droll.crit .dtot{color:#ffe28a;text-shadow:0 0 14px rgba(255,210,90,.8)}
+.droll.fumble .dtot{color:#e0735e}
+.dtag{grid-area:tag;font-weight:700;font-size:12px;color:#ffe28a}
+.droll.fumble .dtag{color:#e0735e}
+@keyframes dIn{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
+@keyframes dShake{0%{rotate:-10deg}50%{rotate:10deg}100%{rotate:-10deg}}
+.status{bottom:auto;top:58px}
 </style>
 </head>
 <body>
