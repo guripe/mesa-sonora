@@ -212,7 +212,9 @@ function paint(){
   for (const t of ts) if (isGM || !t.h) paintLightGlow(t);
   for (const t of ts) if (isGM || !t.h) paintAura(t);
   if (isGM && !gmPreview) for (const t of ts) if (VI(t)) paintVisionGM(t);
-  for (const t of ts) if (isGM || !t.h) paintToken(t);
+  const vsP = !isGM ? viewers() : [];
+  const seenTok = t => isGM || owns(t) || !vsP.length || vsP.some(v => sees(ts.find(x => x.id === v.id) || v, t.x, t.y, ts));
+  for (const t of ts) if ((isGM || !t.h) && seenTok(t)) paintToken(t);
   // névoa, luz e visão
   if (fog.on) paintFog();
   if (!isGM) paintLighting(viewers());
@@ -284,7 +286,7 @@ function paintToken(t){
     const s = Math.max(r * 2 / im.naturalWidth, r * 2 / im.naturalHeight) * .86 * (t.iz || 1);
     ctx.drawImage(im, -im.naturalWidth * s / 2, -im.naturalHeight * s / 2, im.naturalWidth * s, im.naturalHeight * s); ctx.restore();
   } else { ctx.fillStyle = "#1a130b"; ctx.font = `700 ${r * .8}px "Alegreya Sans", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText((t.n || "?").trim().slice(0, 2).toUpperCase(), t.x, t.y + r * .04); }
-  ctx.lineWidth = Math.max(2, r * .1); ctx.strokeStyle = selTok === t.id ? "#fff" : "rgba(0,0,0,.55)"; ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = Math.max(2, r * .1); ctx.strokeStyle = drag?.kind === "token" && drag.blocked && drag.t.id === t.id ? "#ff4a3a" : selTok === t.id ? "#fff" : "rgba(0,0,0,.55)"; ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2); ctx.stroke();
   const vv = VI(t), ll = LI(t);
   const selMine = selTok === t.id && (isGM || owns(t));
   if (selMine || t.dir === "arrow" || (t.dir !== "rotate" && ((vv && vv.ang < 360) || (ll && ll.ang < 360)))) { // seta de direção (arraste para girar)
@@ -407,6 +409,13 @@ function paintLighting(vs, alpha = 1){
   const [U, B] = visibleMask(live, ts);
   const [oc, ox] = off("O");
   ox.fillStyle = "#060504"; ox.fillRect(0, 0, oc.width, oc.height);
+  const ex = fog.ex || {};
+  if (Object.keys(ex).length) { // lugares já vistos ficam à meia-luz
+    ox.globalCompositeOperation = "destination-out"; ox.globalAlpha = .42; W(ox); ox.fillStyle = "#000"; ox.beginPath();
+    const vw = visibleWorld(), pad = G().size;
+    for (const k in ex) { const [a, b] = k.split(",").map(Number); const [x, y] = cellCenter(a, b); if (x < vw.x0 - pad || x > vw.x1 + pad || y < vw.y0 - pad || y > vw.y1 + pad) continue; cellPath(ox, a, b); }
+    ox.fill(); ox.setTransform(1, 0, 0, 1, 0, 0); ox.globalAlpha = 1; ox.globalCompositeOperation = "source-over";
+  }
   ox.globalCompositeOperation = "destination-out"; ox.filter = "blur(3px)"; ox.drawImage(U, 0, 0); ox.filter = "none";
   // penumbra: o que se vê sem luz intensa fica mais escuro
   const [pc, px] = off("P"); px.drawImage(U, 0, 0); px.globalCompositeOperation = "destination-out"; px.drawImage(B, 0, 0);
@@ -456,6 +465,49 @@ function snapWall(x, y, free){
   const v = gridVertexNear(x, y); return Math.hypot(v[0] - x, v[1] - y) < G().size * .3 ? [Math.round(v[0] * 10) / 10, Math.round(v[1] * 10) / 10] : [Math.round(x), Math.round(y)];
 }
 function wallAt(x, y){ const tol = 8 / cam.z; let bi = -1, bd = tol; walls().forEach((w, i) => { const d = distSeg(x, y, [w.p[0], w.p[1]], [w.p[2], w.p[3]]); if (d < bd) { bd = d; bi = i; } }); return bi; }
+function pointInPoly(x, y, poly){ let inside = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside; } return inside; }
+function inCone(t, x, y, ang){ if (!(ang < 360)) return true; const [vx, vy] = dirVec(t.a || 0), dx = x - t.x, dy = y - t.y, L = Math.hypot(dx, dy) || 1; return Math.acos(Math.max(-1, Math.min(1, (dx * vx + dy * vy) / L))) * 180 / Math.PI <= ang / 2 + .5; }
+function lightAt(x, y, ts){ // 2 = luz intensa, 1 = fraca, 0 = escuro
+  const amb = scene.light || "day"; if (amb === "day") return 2;
+  let lvl = amb === "dim" ? 1 : 0;
+  for (const t of ts) {
+    const l = LI(t); if (!l) continue;
+    const d = Math.hypot(x - t.x, y - t.y), R = unitPx(Math.max(l.rb, l.rd)); if (d > R || !inCone(t, x, y, l.ang)) continue;
+    const poly = losPoly(t.x, t.y, R); if (poly && !pointInPoly(x, y, poly)) continue;
+    if (d <= unitPx(l.rb)) return 2; lvl = Math.max(lvl, 1);
+  }
+  return lvl;
+}
+function sees(t, x, y, ts){
+  const v = VI(t); if (!v) return false;
+  const d = Math.hypot(x - t.x, y - t.y), R = unitPx(Math.max(v.rb, v.rd, v.rk, .1));
+  if (d > R) return false; if (d <= tokR(t)) return true;
+  if (!inCone(t, x, y, v.ang)) return false;
+  const poly = losPoly(t.x, t.y, R); if (poly && !pointInPoly(x, y, poly)) return false;
+  if (d <= unitPx(v.rk)) return true;
+  const lv = lightAt(x, y, ts);
+  return (lv === 2 && d <= unitPx(v.rb)) || (lv >= 1 && d <= unitPx(v.rd));
+}
+function segsCross([ax, ay], [bx, by], [cx, cy, dx, dy]){
+  const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax), d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+  const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx), d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && d1 && d2 && d3 && d4;
+}
+const blockedMove = (x1, y1, x2, y2) => blocking().some(w => segsCross([x1, y1], [x2, y2], w));
+// memória: o mestre anota as casas que o grupo já viu e salva no banco
+let exT = null;
+function updateExplored(){
+  if (!isGM) return; clearTimeout(exT);
+  exT = setTimeout(() => {
+    const vs = tokens.filter(t => VI(t) && t.o); if (!vs.length) return;
+    fog.ex = fog.ex || {}; let added = 0;
+    for (const t of vs) {
+      const v = VI(t), R = unitPx(Math.max(v.rb, v.rd, v.rk, .1)), n = Math.min(60, Math.ceil(R / G().size) + 1), [a, b] = cellAt(t.x, t.y);
+      for (const [ca, cb] of cellsInRange(a, b, n)) { const k = ca + "," + cb; if (fog.ex[k]) continue; const [x, y] = cellCenter(ca, cb); if (sees(t, x, y, tokens)) { fog.ex[k] = 1; added++; } }
+    }
+    if (added) { fog.exSig = fogSig(); save("fog"); dirty = true; }
+  }, 350);
+}
 function wallsChanged(){ wallsVer++; save("scene"); dirty = true; }
 let fogCv = document.createElement("canvas"), fctx = fogCv.getContext("2d");
 function paintFog(){
@@ -515,7 +567,7 @@ cv.addEventListener("pointerdown", e => {
       const r = tokR(sel), [vx, vy] = dirVec(sel.a || 0), hx = sel.x + vx * r * 1.2, hy = sel.y + vy * r * 1.2;
       if (Math.hypot(wx - hx, wy - hy) <= Math.max(r * .38, 12 / cam.z)) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; }
     }
-    if (t && (isGM || owns(t))) { selTok = t.id; drag = {kind: "token", t, dx: t.x - wx, dy: t.y - wy, moved: false}; dirty = true; return; }
+    if (t && (isGM || owns(t))) { selTok = t.id; drag = {kind: "token", t, dx: t.x - wx, dy: t.y - wy, moved: false, ox: t.x, oy: t.y}; dirty = true; return; }
     selTok = null; dirty = true;
     drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return;
   }
@@ -551,6 +603,7 @@ cv.addEventListener("pointermove", e => {
     if (a !== drag.t.a) { drag.t.a = a; drag.moved = true; dirty = true; sendTok(drag.t); }
     return;
   }
+  if (drag.kind === "token" && !isGM) drag.blocked = blockedMove(drag.ox, drag.oy, wx + drag.dx, wy + drag.dy);
   if (drag.kind === "token") { drag.t.x = wx + drag.dx; drag.t.y = wy + drag.dy; drag.moved = true; dirty = true; sendTok(drag.t); return; }
   if (drag.kind === "ruler") { rulers[myKey].b = snapPoint(wx, wy); dirty = true; sendRuler(); return; }
   if (drag.kind === "draw") { const p = [Math.round(wx), Math.round(wy)], s = drag.shape; if (s.t === "pen") { const l = s.p[s.p.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 2 / cam.z) s.p.push(p); } else s.p[1] = p; dirty = true; return; }
@@ -569,7 +622,9 @@ function endPointer(e){
   }
   if (d.kind === "token") {
     if (d.moved) {
-      const [x, y] = d.t.sn === false ? [Math.round(d.t.x), Math.round(d.t.y)] : snapPoint(d.t.x, d.t.y, d.t.s || 1); d.t.x = x; d.t.y = y; delete tokLive[d.t.id];
+      let [x, y] = d.t.sn === false ? [Math.round(d.t.x), Math.round(d.t.y)] : snapPoint(d.t.x, d.t.y, d.t.s || 1);
+      if (!isGM && blockedMove(d.ox, d.oy, x, y)) { x = d.ox; y = d.oy; toast("Tem uma parede no caminho."); }
+      d.t.x = x; d.t.y = y; delete tokLive[d.t.id];
       if (isGM) { send("tok", {id: d.t.id, x, y}); save("tokens"); }
       else send("tokreq", {id: d.t.id, x, y, who: myNick});
     }
@@ -595,6 +650,7 @@ addEventListener("keydown", e => {
   const k = e.key.toLowerCase();
   if (k === "enter" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (k === "escape" && wallDraft) { wallDraft = null; dirty = true; return; }
+  if (k === "escape" && diceModal) { closeDiceModal(); return; }
   if (k === "escape") { if (rulers[myKey]) { delete rulers[myKey]; sendRuler(); dirty = true; } closePanel(); closeFlyout(); selTok = null; return; }
   if (k === "+" || k === "=") return zoomAt(1.2);
   if (k === "-") return zoomAt(1 / 1.2);
@@ -646,6 +702,7 @@ function sendRuler(){
 const saveTimers = {};
 function save(col){
   if (!isGM) return;
+  if (col === "tokens" || col === "scene") updateExplored();
   clearTimeout(saveTimers[col]); lastSave[col] = Date.now();
   saveTimers[col] = setTimeout(async () => {
     const val = col === "scene" ? scene : col === "tokens" ? tokens : col === "fog" ? fog : drawings;
@@ -666,7 +723,7 @@ function apply(d){
   if (d.scene && fresh("scene")) scene = {...scene, ...d.scene, grid: {...scene.grid, ...(d.scene.grid || {})}};
   if (d.tokens && fresh("tokens") && !(drag?.kind === "token")) tokens = d.tokens;
   if (d.scene) wallsVer++;
-  if (d.fog && fresh("fog") && !(drag?.kind?.startsWith("fog"))) fog = {on: !!d.fog.on, cells: d.fog.cells || {}, sig: d.fog.sig};
+  if (d.fog && fresh("fog") && !(drag?.kind?.startsWith("fog"))) fog = {on: !!d.fog.on, cells: d.fog.cells || {}, sig: d.fog.sig, ex: d.fog.ex || {}};
   if (d.drawings && fresh("drawings") && drag?.kind !== "draw") drawings = d.drawings;
   dirty = true; drawTop(); drawEmpty();
 }
@@ -741,7 +798,11 @@ function openFlyout(kind){
       <div class="seg" id="fShape" style="margin-bottom:10px"><button data-fs="brush" aria-pressed="${opt.fogShape === "brush"}">${I.brush} Pincel</button><button data-fs="rect" aria-pressed="${opt.fogShape === "rect"}">${I.rect} Retângulo</button></div>
       ${opt.fogShape === "brush" ? `<div class="lbl">Tamanho do pincel: ${opt.brush} ${opt.brush === 1 ? "casa" : "casas"}</div><input type="range" id="fB" min="1" max="6" value="${opt.brush}">` : ""}
       <div class="row" style="margin:12px 0 0"><button class="btn small" id="fAll">Revelar tudo</button><button class="btn small" id="fNone">Esconder tudo</button></div>
-      <p class="hint">Você vê a névoa transparente; os jogadores veem preto. Tokens e desenhos embaixo da névoa ficam escondidos pra eles.</p></div>`;
+      <p class="hint">Você vê a névoa transparente; os jogadores veem preto. Tokens e desenhos embaixo da névoa ficam escondidos pra eles.</p>
+      <div class="lbl" style="margin-top:12px">Memória dos jogadores</div>
+      <p class="hint">Onde os personagens já viram fica guardado (mais escuro) quando eles se afastam. ${Object.keys(fog.ex || {}).length} casas exploradas.</p>
+      <div class="row" style="margin:8px 0 0"><button class="btn small danger" id="fExClear">Apagar memória</button></div></div>`;
+    $("#fExClear").onclick = () => { if (confirm("Apagar tudo o que os jogadores já exploraram?")) { fog.ex = {}; save("fog"); dirty = true; openFlyout("fog"); } };
     $("#fOn").onchange = e => { fog.on = e.target.checked; save("fog"); dirty = true; };
     $("#fMode").onclick = e => { const b = e.target.closest("[data-fog]"); if (b) { opt.fog = b.dataset.fog; openFlyout("fog"); } };
     $("#fShape").onclick = e => { const b = e.target.closest("[data-fs]"); if (b) { opt.fogShape = b.dataset.fs; openFlyout("fog"); } };
@@ -953,78 +1014,174 @@ function askNick(){
 
 
 // ---------- dados (mestre e jogadores) ----------
-const DICE = [4, 6, 8, 10, 12, 20];
+const DICE = [4, 6, 8, 10, 12, 20, 100];
 const DIE_SHAPE = {4: "polygon(50% 4%, 97% 90%, 3% 90%)", 6: "polygon(8% 8%, 92% 8%, 92% 92%, 8% 92%)", 8: "polygon(50% 2%, 96% 50%, 50% 98%, 4% 50%)",
-  10: "polygon(50% 2%, 97% 40%, 80% 90%, 20% 90%, 3% 40%)", 12: "polygon(50% 2%, 90% 22%, 98% 65%, 72% 97%, 28% 97%, 2% 65%, 10% 22%)", 20: "polygon(50% 1%, 94% 25%, 94% 75%, 50% 99%, 6% 75%, 6% 25%)"};
-const DIE_COLOR = {4: "#6a8f4e", 6: "#b8872f", 8: "#4a72b8", 10: "#8a5bb0", 12: "#b0563d", 20: "#c9a227"};
-let diceCounts = (() => { try { return JSON.parse(localStorage.getItem("mesa.dice")) || {}; } catch { return {}; } })();
-let diceMod = 0, diceSecret = false, diceLog = [], diceOpen = false;
-const dieEl = (d, v, cls = "") => `<span class="die d${d} ${cls}" style="--dc:${DIE_COLOR[d]};--shape:${DIE_SHAPE[d]}"><span class="die-n">${v}</span></span>`;
-function diceFormula(){ let f = [...DICE].reverse().filter(d => diceCounts[d] > 0).map(d => `${diceCounts[d]}d${d}`).join(" + "); if (diceMod) f += (diceMod > 0 ? " + " : " − ") + Math.abs(diceMod); return f; }
+  10: "polygon(50% 2%, 97% 40%, 80% 90%, 20% 90%, 3% 40%)", 12: "polygon(50% 2%, 90% 22%, 98% 65%, 72% 97%, 28% 97%, 2% 65%, 10% 22%)", 20: "polygon(50% 1%, 94% 25%, 94% 75%, 50% 99%, 6% 75%, 6% 25%)", 100: "circle(48%)"};
+const DIE_COLOR = {4: "#6a8f4e", 6: "#b8872f", 8: "#4a72b8", 10: "#8a5bb0", 12: "#b0563d", 20: "#c9a227", 100: "#5c8d8a"};
+const dShape = d => DIE_SHAPE[d] || "circle(48%)", dColor = d => DIE_COLOR[d] || "#8c7a5c";
+const DEF_PRESETS = [{n: "Teste (d20)", f: "1d20"}, {n: "Ataque", f: "1d20+3"}, {n: "Dano", f: "1d8+2"}, {n: "Vantagem", f: "2d20kh1"}];
+let presets = (() => { try { const v = JSON.parse(localStorage.getItem("mesa.presets")); return Array.isArray(v) ? v : DEF_PRESETS.slice(); } catch { return DEF_PRESETS.slice(); } })();
+const savePresets = () => { try { localStorage.setItem("mesa.presets", JSON.stringify(presets)); } catch {} };
+let diceCounts = {}, diceMod = 0, diceAdv = 0, diceSecret = false, diceLog = [], diceText = "", diceModal = false, lastResult = null;
+const dieEl = (d, v, cls = "") => `<span class="die d${d} ${cls}" style="--dc:${dColor(d)};--shape:${dShape(d)}"><span class="die-n">${v}</span></span>`;
+const rnd = x => 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * x);
+function countsFormula(){ let f = [...DICE].reverse().filter(d => diceCounts[d] > 0).map(d => `${diceCounts[d]}d${d}`).join(" + "); if (diceMod) f += (f ? (diceMod > 0 ? " + " : " − ") : (diceMod > 0 ? "" : "−")) + Math.abs(diceMod); return f; }
+function parseFormula(str){ // "2d20kh1 + 1d6 - 2"
+  const src = String(str || "").toLowerCase().replace(/[−–]/g, "-").replace(/\s+/g, "");
+  if (!src) throw new Error("fórmula vazia");
+  const re = /([+-]?)(?:(\d*)d(\d+)(k[hl]\d+)?|(\d+))/y; const terms = []; let m, pos = 0;
+  while (pos < src.length) {
+    re.lastIndex = pos; m = re.exec(src); if (!m || !m[0]) throw new Error(`não entendi “${src.slice(pos)}”`);
+    if (terms.length && !m[1]) throw new Error("falta + ou − entre os termos");
+    const sign = m[1] === "-" ? -1 : 1;
+    if (m[3]) { const n = +(m[2] || 1), x = +m[3]; if (n < 1 || n > 50 || x < 2 || x > 1000) throw new Error("use até 50 dados, de d2 a d1000"); const k = m[4] ? {h: m[4][1] === "h", k: Math.max(1, Math.min(n, +m[4].slice(2)))} : null; terms.push({sign, n, x, k}); }
+    else terms.push({sign, c: +m[5]});
+    pos = re.lastIndex;
+  }
+  return terms;
+}
+function rollFormula(str, adv = 0){
+  const terms = parseFormula(str);
+  if (adv) { const t = terms.find(t => t.x === 20 && t.n === 1 && !t.k); if (t) { t.n = 2; t.k = {h: adv > 0, k: 1}; } }
+  const dice = []; let total = 0, mod = 0;
+  for (const t of terms) {
+    if (t.c != null) { total += t.sign * t.c; mod += t.sign * t.c; continue; }
+    const vals = Array.from({length: t.n}, () => rnd(t.x));
+    let keep = vals.map((_, i) => i);
+    if (t.k) keep = vals.map((v, i) => [v, i]).sort((a, b) => t.k.h ? b[0] - a[0] : a[0] - b[0]).slice(0, t.k.k).map(x => x[1]);
+    vals.forEach((v, i) => { const kept = keep.includes(i); dice.push({d: t.x, v, x: kept ? 0 : 1, neg: t.sign < 0 ? 1 : 0}); if (kept) total += t.sign * v; });
+  }
+  const f = terms.map((t, i) => (i ? (t.sign < 0 ? " − " : " + ") : (t.sign < 0 ? "−" : "")) + (t.c != null ? t.c : `${t.n}d${t.x}${t.k ? (t.k.h ? "kh" : "kl") + t.k.k : ""}`)).join("");
+  return {f, dice, mod, total};
+}
 const DS = { ctx: null,
   init(){ if (!this.ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return false; this.ctx = new C(); } if (this.ctx.state === "suspended") this.ctx.resume(); return true; },
   click(t, f, v, len){ const c = this.ctx, b = c.createBuffer(1, Math.ceil(c.sampleRate * len), c.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = c.createBufferSource(), bp = c.createBiquadFilter(), g = c.createGain(); s.buffer = b; bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = 6; g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.001, t + len); s.connect(bp).connect(g).connect(c.destination); s.start(t); },
   tone(t, f, len, v, type = "triangle"){ const c = this.ctx, o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .01); g.gain.exponentialRampToValueAtTime(.001, t + len); o.connect(g).connect(c.destination); o.start(t); o.stop(t + len + .05); },
-  rattle(n){ if (!this.init()) return; const t0 = this.ctx.currentTime; for (let i = 0; i < 12 + n * 6; i++) { const x = Math.pow(Math.random(), 1.6) * .8; this.click(t0 + x, 1800 + Math.random() * 3000, .18 * (1 - x), .02); } },
-  crit(){ if (!this.init()) return; const t = this.ctx.currentTime + .05; [523, 659, 784, 1047].forEach((f, i) => this.tone(t + i * .09, f, .5, .12, "square")); },
+  rattle(n){ if (!this.init()) return; const t0 = this.ctx.currentTime; for (let i = 0; i < 12 + Math.min(n, 8) * 6; i++) { const x = Math.pow(Math.random(), 1.6) * .8; this.click(t0 + x, 1800 + Math.random() * 3000, .18 * (1 - x), .02); } },
+  crit(){ if (!this.init()) return; const t = this.ctx.currentTime + .05; [523, 659, 784, 1047].forEach((f, i) => this.tone(t + i * .09, f, .5, .12, "square")); [1047, 1319, 1568].forEach(f => this.tone(t + .4, f, 1.2, .08)); },
   fumble(){ if (!this.init()) return; const t = this.ctx.currentTime + .05; [311, 294, 277, 262].forEach((f, i) => this.tone(t + i * .3, f, i === 3 ? .9 : .3, .15, "sawtooth")); },
 };
-function drawDiceDock(){
-  let el = $("#diceDock"); if (!el) { el = document.createElement("div"); el.id = "diceDock"; el.className = "dice-dock"; document.body.appendChild(el); }
-  const any = DICE.some(d => diceCounts[d] > 0);
-  el.innerHTML = `<div class="dlog" id="dLog" aria-live="polite">${diceLog.slice(-6).map(logRow).join("")}</div>
-    ${diceOpen ? `<div class="dpanel">
-      <div class="dmenu">${DICE.map(d => { const n = diceCounts[d] || 0; return `<button class="dpick ${n ? "on" : ""}" data-dp="${d}" title="Adicionar d${d} (botão direito tira)">${dieEl(d, "d" + d, "mini")}${n ? `<span class="dbadge">${n}</span>` : ""}</button>`; }).join("")}</div>
-      <div class="drow"><span>Bônus</span><button class="btn small" data-dm="-1">−</button><b>${diceMod > 0 ? "+" + diceMod : diceMod}</b><button class="btn small" data-dm="1">+</button>
-        <span class="dform">${any ? esc(diceFormula()) : "escolha os dados"}</span></div>
-      <div class="drow">${isGM ? `<label class="chk"><input type="checkbox" id="dSecret" ${diceSecret ? "checked" : ""}> Secreta (só você vê)</label>` : ""}<span class="spacer"></span>
-        <button class="btn small" id="dClear" ${any || diceMod ? "" : "disabled"}>Limpar</button><button class="btn small primary" id="dRoll" ${any ? "" : "disabled"}>🎲 Rolar</button></div>
-    </div>` : ""}
-    <button class="btn dice-toggle" id="dToggle" aria-expanded="${diceOpen}">🎲 Dados</button>`;
-  $("#dToggle").onclick = () => { diceOpen = !diceOpen; drawDiceDock(); };
-  if (!diceOpen) return;
-  const pnl = el.querySelector(".dpanel");
-  pnl.onclick = e => {
-    const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.dp) { const d = +b.dataset.dp; diceCounts[d] = Math.min(20, (diceCounts[d] || 0) + 1); }
-    else if (b.dataset.dm) diceMod = Math.max(-30, Math.min(30, diceMod + +b.dataset.dm));
-    else if (b.id === "dClear") { diceCounts = {}; diceMod = 0; }
-    else if (b.id === "dRoll") return rollDice();
-    try { localStorage.setItem("mesa.dice", JSON.stringify(diceCounts)); } catch {}
-    drawDiceDock();
-  };
-  pnl.oncontextmenu = e => { const b = e.target.closest("[data-dp]"); if (!b) return; e.preventDefault(); const d = +b.dataset.dp; diceCounts[d] = Math.max(0, (diceCounts[d] || 0) - 1); drawDiceDock(); };
-  const sc = $("#dSecret"); if (sc) sc.onchange = e => { diceSecret = e.target.checked; };
+const natOf = r => { const d20 = r.dice.filter(x => x.d === 20 && !x.x); return d20.some(x => x.v === 20) ? "crit" : d20.some(x => x.v === 1) ? "fumble" : ""; };
+function facesHTML(r, big){
+  return r.dice.map(x => dieEl(x.d, r.fresh ? "?" : x.v, (big ? "big2 " : "mini ") + (x.x ? "drop " : "") + (!r.fresh && x.d === 20 && !x.x && (x.v === 20 || x.v === 1) ? (x.v === 20 ? "c20" : "c1") : ""))).join("")
+    + (r.mod ? `<span class="dmod">${r.mod > 0 ? "+" : "−"}${Math.abs(r.mod)}</span>` : "");
 }
 function logRow(r){
-  const nat = r.dice.some(x => x.d === 20 && x.v === 20) ? "crit" : r.dice.some(x => x.d === 20 && x.v === 1) ? "fumble" : "";
+  const nat = r.fresh ? "" : natOf(r);
   return `<div class="droll ${nat} ${r.fresh ? "fresh" : ""} ${r.secret ? "secret" : ""}" data-rid="${r.id}">
-    <div class="dwho">${esc(r.who)}${r.secret ? " · secreta" : ""}<span>${esc(r.f)}</span></div>
-    <div class="dfaces">${r.dice.map(x => dieEl(x.d, r.fresh ? "?" : x.v, "mini" + (x.d === 20 && (x.v === 20 || x.v === 1) && !r.fresh ? (x.v === 20 ? " c20" : " c1") : ""))).join("")}${r.mod ? `<span class="dmod">${r.mod > 0 ? "+" : "−"}${Math.abs(r.mod)}</span>` : ""}</div>
+    <div class="dwho">${esc(r.who)}${r.label ? ` · <i>${esc(r.label)}</i>` : ""}${r.secret ? " · secreta" : ""}<span>${esc(r.f)}</span></div>
+    <div class="dfaces">${facesHTML(r)}</div>
     <div class="dtot">${r.fresh ? "…" : r.total}</div>
-    ${!r.fresh && nat === "crit" ? '<div class="dtag">⚔️ CRÍTICO!</div>' : ""}${!r.fresh && nat === "fumble" ? '<div class="dtag">💀 FALHA CRÍTICA</div>' : ""}</div>`;
+    ${nat === "crit" ? '<div class="dtag">⚔️ CRÍTICO!</div>' : nat === "fumble" ? '<div class="dtag">💀 FALHA CRÍTICA</div>' : ""}</div>`;
 }
-function addRoll(r){
-  r.fresh = true; diceLog.push(r); if (diceLog.length > 40) diceLog.shift(); drawDiceDock();
-  DS.rattle(r.dice.length);
-  const el = document.querySelector(`[data-rid="${r.id}"]`), t0 = performance.now();
-  const spin = () => {
-    const row = document.querySelector(`[data-rid="${r.id}"]`); if (!row) return;
-    if (performance.now() - t0 < 700) { row.querySelectorAll(".die-n").forEach((n, i) => { if (r.dice[i]) n.textContent = 1 + Math.floor(Math.random() * r.dice[i].d); }); return requestAnimationFrame(spin); }
-    r.fresh = false; drawDiceDock();
-    if (r.dice.some(x => x.d === 20 && x.v === 20)) DS.crit(); else if (r.dice.some(x => x.d === 20 && x.v === 1)) DS.fumble();
+function drawDiceLog(){
+  let el = $("#diceLog"); if (!el) { el = document.createElement("div"); el.id = "diceLog"; el.className = "dlog"; el.setAttribute("aria-live", "polite"); document.body.appendChild(el); }
+  el.innerHTML = diceLog.slice(-6).map(logRow).join("");
+  el.scrollTop = el.scrollHeight;
+}
+function drawDiceBar(){
+  let el = $("#diceBar"); if (!el) { el = document.createElement("div"); el.id = "diceBar"; el.className = "dicebar"; document.body.appendChild(el); }
+  el.innerHTML = `<button class="btn dice-main" id="dOpen" title="Abrir a mesa de dados">🎲 Rolar dados</button>
+    <div class="presets" role="toolbar" aria-label="Rolagens prontas">${presets.map((p, i) => `<button class="btn pchip" data-pre="${i}" title="${esc(p.f)}">${esc(p.n)}<small>${esc(p.f)}</small></button>`).join("")}
+    <button class="btn pchip pedit" id="dEditPre" title="Criar e editar rolagens prontas" aria-label="Editar rolagens prontas">✎</button></div>`;
+  $("#dOpen").onclick = () => openDiceModal();
+  $("#dEditPre").onclick = () => openDiceModal("presets");
+  el.querySelector(".presets").onclick = e => { const b = e.target.closest("[data-pre]"); if (b) { const p = presets[+b.dataset.pre]; doRoll(p.f, 0, p.n); } };
+}
+function openDiceModal(focus){
+  diceModal = true;
+  let m = $("#diceModal"); if (!m) { m = document.createElement("div"); m.id = "diceModal"; m.className = "dmodal-wrap"; document.body.appendChild(m); }
+  const any = DICE.some(d => diceCounts[d] > 0);
+  if (!diceText && any) diceText = countsFormula();
+  const r = lastResult, nat = r ? natOf(r) : "";
+  m.innerHTML = `<div class="dmodal" role="dialog" aria-label="Mesa de dados">
+    <div class="dm-head"><b>Mesa de dados</b><span class="sub">${isGM ? "mestre" : esc(myNick || "jogador")} · todos veem ${isGM ? "(a menos que seja secreta)" : "a sua rolagem"}</span><button class="btn small" id="dmClose">Fechar</button></div>
+    <div class="dm-body">
+      <div class="dm-left">
+        <div class="dm-menu">${DICE.map(d => { const n = diceCounts[d] || 0; return `<div class="dm-die ${n ? "on" : ""}" style="--dc:${dColor(d)}">
+          <button class="dm-pick" data-dp="${d}" aria-label="Adicionar d${d}">${dieEl(d, d === 100 ? "%" : d, "card")}${n ? `<span class="dbadge">${n}×</span>` : ""}</button>
+          <span class="dm-lbl">d${d}</span>
+          <div class="dm-ctl"><button class="dstep" data-dminus="${d}" ${n ? "" : "disabled"} aria-label="Menos um d${d}">−</button><span>${n}</span><button class="dstep" data-dp="${d}" aria-label="Mais um d${d}">+</button></div></div>`; }).join("")}</div>
+        <div class="dm-row"><span class="dm-k">Bônus</span><button class="dstep" data-dm="-1">−</button><b class="dm-mod">${diceMod > 0 ? "+" + diceMod : diceMod}</b><button class="dstep" data-dm="1">+</button>
+          <span class="dm-k" style="margin-left:14px">d20</span><div class="seg" id="dmAdv"><button data-adv="0" aria-pressed="${diceAdv === 0}">Normal</button><button data-adv="1" aria-pressed="${diceAdv === 1}">Vantagem</button><button data-adv="-1" aria-pressed="${diceAdv === -1}">Desvantagem</button></div></div>
+        <label class="dm-k" for="dmText">Fórmula (pode digitar)</label>
+        <div class="dm-row"><input id="dmText" value="${esc(diceText)}" placeholder="ex.: 1d20+5, 2d6+1d4+2, 4d6kh3"><button class="btn small" id="dmClear">Limpar</button></div>
+        <div class="dm-err" id="dmErr"></div>
+        <div class="dm-row">${isGM ? `<label class="chk"><input type="checkbox" id="dmSecret" ${diceSecret ? "checked" : ""}> Rolagem secreta (só você vê)</label>` : ""}<span class="spacer"></span>
+          <button class="btn" id="dmSave">☆ Salvar como atalho</button><button class="btn primary dm-roll" id="dmRoll">🎲 Rolar</button></div>
+        <div class="dm-result ${nat}" id="dmResult">${r ? `<div class="dm-faces">${facesHTML(r, true)}</div><div class="dm-total">${r.fresh ? "…" : r.total}</div><div class="sub">${esc(r.label ? r.label + " · " : "")}${esc(r.f)}</div>${!r.fresh && nat === "crit" ? '<div class="crit-tag">⚔️ CRÍTICO! 20 natural</div>' : ""}${!r.fresh && nat === "fumble" ? '<div class="fumble-tag">💀 FALHA CRÍTICA… 1 natural</div>' : ""}` : `<div class="sub">Escolha os dados ou use uma rolagem pronta.</div>`}</div>
+      </div>
+      <div class="dm-right">
+        <div class="dm-k">Rolagens prontas <span class="sub">(só neste computador)</span></div>
+        <div class="dm-pres" id="dmPres">${presets.map((p, i) => `<div class="dm-pre"><input data-pn="${i}" value="${esc(p.n)}" maxlength="24" aria-label="Nome da rolagem"><input data-pf="${i}" value="${esc(p.f)}" maxlength="40" aria-label="Fórmula"><button class="btn small primary" data-prr="${i}" title="Rolar">🎲</button><button class="btn small" data-pup="${i}" title="Subir" ${i ? "" : "disabled"}>↑</button><button class="btn small danger" data-pdel="${i}" title="Apagar">✕</button></div>`).join("") || `<p class="hint">Nenhuma ainda.</p>`}</div>
+        <button class="btn small" id="dmNewPre">＋ Nova rolagem pronta</button>
+        <p class="hint">Aparecem como botões ao lado de “Rolar dados”. Use <b>kh</b>/<b>kl</b> para ficar com os maiores/menores: <b>2d20kh1</b> = vantagem, <b>4d6kh3</b> = atributo.</p>
+        <div class="dm-k" style="margin-top:12px">Últimas rolagens</div>
+        <div class="dm-hist">${diceLog.slice(-8).reverse().map(x => `<div><b>${esc(x.who)}</b> ${esc(x.label || x.f)} → <b class="${natOf(x)}">${x.fresh ? "…" : x.total}</b></div>`).join("") || `<p class="hint">Nada ainda.</p>`}</div>
+      </div>
+    </div></div>`;
+  const q = sel => m.querySelector(sel);
+  const redraw = () => openDiceModal();
+  q("#dmClose").onclick = closeDiceModal;
+  m.onclick = e => { if (e.target === m) closeDiceModal(); };
+  q(".dm-menu").onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.dp) { const d = +b.dataset.dp; diceCounts[d] = Math.min(50, (diceCounts[d] || 0) + 1); }
+    else if (b.dataset.dminus) { const d = +b.dataset.dminus; diceCounts[d] = Math.max(0, (diceCounts[d] || 0) - 1); }
+    diceText = countsFormula(); redraw();
   };
-  if (el) requestAnimationFrame(spin);
+  q(".dm-menu").oncontextmenu = e => { const b = e.target.closest("[data-dp]"); if (!b) return; e.preventDefault(); const d = +b.dataset.dp; diceCounts[d] = Math.max(0, (diceCounts[d] || 0) - 1); diceText = countsFormula(); redraw(); };
+  m.querySelectorAll("[data-dm]").forEach(b => b.onclick = () => { diceMod = Math.max(-50, Math.min(50, diceMod + +b.dataset.dm)); diceText = countsFormula(); redraw(); });
+  q("#dmAdv").onclick = e => { const b = e.target.closest("[data-adv]"); if (b) { diceAdv = +b.dataset.adv; redraw(); } };
+  const tx = q("#dmText"); tx.oninput = () => { diceText = tx.value; q("#dmErr").textContent = ""; };
+  tx.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") q("#dmRoll").click(); };
+  q("#dmClear").onclick = () => { diceCounts = {}; diceMod = 0; diceText = ""; redraw(); };
+  const sc = q("#dmSecret"); if (sc) sc.onchange = e => diceSecret = e.target.checked;
+  q("#dmRoll").onclick = () => { try { parseFormula(diceText); } catch (err) { q("#dmErr").textContent = "Fórmula: " + err.message; return; } doRoll(diceText, diceAdv, "", isGM && diceSecret); };
+  q("#dmSave").onclick = () => {
+    try { parseFormula(diceText); } catch (err) { q("#dmErr").textContent = "Fórmula: " + err.message; return; }
+    const f = diceAdv && /(^|[^\d])1?d20(?!\d)/.test(diceText) ? diceText.replace(/(^|[^\d])1?d20(?!\d|k)/, `$12d20${diceAdv > 0 ? "kh1" : "kl1"}`) : diceText;
+    presets.push({n: "Nova rolagem", f: f.replace(/\s+/g, "")}); savePresets(); drawDiceBar(); openDiceModal("presets");
+    setTimeout(() => { const i = m.querySelector(`[data-pn="${presets.length - 1}"]`); i?.focus(); i?.select(); }, 0);
+  };
+  const pres = q("#dmPres");
+  pres.oninput = e => { const i = e.target.dataset.pn ?? e.target.dataset.pf; if (i == null) return; if (e.target.dataset.pn != null) presets[+i].n = e.target.value; else presets[+i].f = e.target.value; savePresets(); drawDiceBar(); };
+  pres.onkeydown = e => e.stopPropagation();
+  pres.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.prr != null) { const p = presets[+b.dataset.prr]; try { parseFormula(p.f); } catch (err) { q("#dmErr").textContent = `“${p.n}”: ${err.message}`; return; } doRoll(p.f, 0, p.n, isGM && diceSecret); }
+    else if (b.dataset.pup != null) { const i = +b.dataset.pup; [presets[i - 1], presets[i]] = [presets[i], presets[i - 1]]; savePresets(); drawDiceBar(); redraw(); }
+    else if (b.dataset.pdel != null) { presets.splice(+b.dataset.pdel, 1); savePresets(); drawDiceBar(); redraw(); }
+  };
+  q("#dmNewPre").onclick = () => { presets.push({n: "Nova rolagem", f: "1d20"}); savePresets(); drawDiceBar(); openDiceModal("presets"); setTimeout(() => { const i = m.querySelector(`[data-pn="${presets.length - 1}"]`); i?.focus(); i?.select(); }, 0); };
+  if (focus === "presets") q("#dmPres")?.scrollIntoView({block: "nearest"}); else if (!focus) {}
 }
-function rollDice(){
-  const dice = [];
-  for (const d of [...DICE].reverse()) for (let i = 0; i < (diceCounts[d] || 0); i++) dice.push({d, v: 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * d)});
-  if (!dice.length) return;
-  const r = {id: uid(), who: isGM ? "Mestre" : (myNick || "Jogador"), f: diceFormula(), dice, mod: diceMod, total: dice.reduce((a, x) => a + x.v, 0) + diceMod, secret: isGM && diceSecret};
+function closeDiceModal(){ diceModal = false; $("#diceModal")?.remove(); }
+function addRoll(r, mine){
+  r.fresh = true; diceLog.push(r); if (diceLog.length > 50) diceLog.shift();
+  if (mine) lastResult = r;
+  drawDiceLog(); if (diceModal && mine) openDiceModal("keep");
+  DS.rattle(r.dice.length);
+  const t0 = performance.now();
+  const spin = () => {
+    if (performance.now() - t0 < 750) {
+      document.querySelectorAll(`[data-rid="${r.id}"] .die-n`).forEach((n, i) => { if (r.dice[i]) n.textContent = rnd(r.dice[i].d); });
+      if (mine && diceModal) $("#dmResult")?.querySelectorAll(".die-n").forEach((n, i) => { if (r.dice[i]) n.textContent = rnd(r.dice[i].d); });
+      return requestAnimationFrame(spin);
+    }
+    r.fresh = false; drawDiceLog(); if (diceModal && mine) openDiceModal("keep");
+    const nat = natOf(r); if (nat === "crit") DS.crit(); else if (nat === "fumble") DS.fumble();
+  };
+  requestAnimationFrame(spin);
+}
+function doRoll(formula, adv = 0, label = "", secret = false){
+  let res; try { res = rollFormula(formula, adv); } catch (err) { toast("Não rolei: " + err.message); return; }
+  if (adv) res.f += adv > 0 ? " (vantagem)" : " (desvantagem)";
+  const r = {id: uid(), who: isGM ? "Mestre" : (myNick || "Jogador"), label: label || "", ...res, secret: !!secret};
   if (!r.secret) send("roll", r);
-  addRoll(r);
+  addRoll(r, true);
 }
-
 // ---------- início ----------
 async function boot(){
   let cfg;
@@ -1052,7 +1209,11 @@ async function boot(){
     if (!isGM || !p?.id) return;
     const t = tokens.find(x => x.id === p.id); if (!t || !t.o) return;
     if (t.o !== "*" && String(p.who || "").toLowerCase() !== t.o.toLowerCase()) return;
-    if (p.x != null) { const [x, y] = t.sn === false ? [Math.round(p.x), Math.round(p.y)] : snapPoint(p.x, p.y, t.s || 1); t.x = x; t.y = y; }
+    if (p.x != null) {
+      const [x, y] = t.sn === false ? [Math.round(p.x), Math.round(p.y)] : snapPoint(p.x, p.y, t.s || 1);
+      if (blockedMove(t.x, t.y, x, y)) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); return; } // atravessaria parede: devolve
+      t.x = x; t.y = y;
+    }
     if (p.a != null) t.a = ((+p.a % 360) + 360) % 360;
     if (p.bi != null && t.b?.[p.bi] && isFinite(+p.bv)) t.b[p.bi].v = Math.round(+p.bv);
     delete tokLive[t.id]; send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); dirty = true;
@@ -1064,10 +1225,10 @@ async function boot(){
   chan.on("broadcast", {event: "ruler"}, ({payload: p}) => { if (!p?.k) return; if (p.r) rulers[p.k] = p.r; else delete rulers[p.k]; dirty = true; });
   chan.on("broadcast", {event: "state"}, ({payload: p}) => { if (!isGM && p?.col) apply({[p.col]: p.val}); });
   if (!isGM) setInterval(load, 20000);                 // rede de segurança
-  chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (r?.id && Array.isArray(r.dice)) addRoll({...r, dice: r.dice.slice(0, 60).filter(x => DICE.includes(x.d)), secret: false}); });
+  chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (r?.id && Array.isArray(r.dice)) addRoll({id: String(r.id), who: String(r.who || "?").slice(0, 30), label: String(r.label || "").slice(0, 30), f: String(r.f || "").slice(0, 60), mod: +r.mod || 0, total: +r.total || 0, dice: r.dice.slice(0, 60).filter(x => x.d >= 2 && x.d <= 1000).map(x => ({d: +x.d, v: +x.v, x: x.x ? 1 : 0})), secret: false}); });
   chan.on("broadcast", {event: "view"}, ({payload: p}) => { if (!isGM && p) { centerOn(p.x, p.y, p.z); toast("O mestre levou você para esta parte do mapa."); } });
   chan.subscribe(st => { if (st === "SUBSCRIBED") chan.track({name: isGM ? "Mestre" : myNick, role: isGM ? "gm" : "player"}); $("#status").textContent = st === "SUBSCRIBED" ? (isGM ? "ao vivo · jogadores veem o que você fizer" : "ao vivo") : "reconectando…"; });
-  drawDiceDock();
+  drawDiceBar(); drawDiceLog();
   requestAnimationFrame(frame);
 }
 boot();
