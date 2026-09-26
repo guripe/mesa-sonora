@@ -110,3 +110,7 @@ create policy "mestre edita pastas" on public.folders for all to authenticated u
 do $$ begin
   begin alter publication supabase_realtime add table public.folders; exception when duplicate_object then null; end;
 end $$;
+
+-- v5: ordem manual de sons e pastas (arrastar e soltar)
+alter table public.sounds add column if not exists sort real;
+alter table public.folders add column if not exists sort real;

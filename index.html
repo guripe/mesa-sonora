@@ -226,6 +226,22 @@ img{max-width:100%}
 .fchip.colored[aria-pressed=true]{background:color-mix(in srgb,var(--c) 45%,var(--card));border-color:var(--c);box-shadow:0 0 0 1px var(--c)}
 .pad.playing{border-color:var(--brass);box-shadow:0 0 0 2px var(--brass),0 0 18px rgba(208,165,76,.35)}
 .pad.playing::after{content:"■ parar";position:absolute;bottom:8px;right:10px;font:700 11px/1 var(--body);color:var(--brass);letter-spacing:.04em}
+
+/* v5: rolagem e arrastar-e-soltar */
+.scroll-box{max-height:min(52vh,520px);overflow-y:auto;overscroll-behavior:contain;padding:4px 6px 4px 2px;margin-right:-6px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.sfx-sec .scroll-box{max-height:min(62vh,640px)}
+.scroll-box::-webkit-scrollbar{width:8px}
+.scroll-box::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+.folders{max-height:120px;overflow-y:auto;scrollbar-width:thin}
+[data-drag]{cursor:grab}
+[data-drag]:active{cursor:grabbing}
+.is-dragging{opacity:.35}
+.row.drop-before{box-shadow:0 -3px 0 var(--brass)}
+.row.drop-after{box-shadow:0 3px 0 var(--brass)}
+.amb.drop-before,.pad-wrap.drop-before,.fchip.drop-before{box-shadow:-4px 0 0 var(--brass)}
+.amb.drop-after,.pad-wrap.drop-after,.fchip.drop-after{box-shadow:4px 0 0 var(--brass)}
+.fchip.drop-into{outline:2px dashed var(--brass);outline-offset:2px}
+section.sec.drop-into{outline:2px dashed var(--brass);outline-offset:-2px}
 </style>
 
 </head>

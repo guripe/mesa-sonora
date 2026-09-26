@@ -25,7 +25,7 @@ let peers = [];
 let joined = false;
 let filter = "";
 let lastSfx = null;
-let folderColors = {};    // nome da pasta -> cor
+let folderColors = {}, folderSort = {};    // nome da pasta -> cor
 let curFolder = "";       // "" todas, "__fav" favoritos, ou nome da pasta
 let visibleSfx = [];
 let myVol = 0.85, nick = "";
@@ -75,7 +75,10 @@ function folderPicker(root, initial){
   return { get: () => value };
 }
 const KIND_BTNS = [["sfx", "Efeito"], ["ambient", "Ambiente"], ["music", "Trilha"]];
-const folders = () => [...new Set(sounds.map(s => (s.folder || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+const folders = () => [...new Set(sounds.map(s => (s.folder || "").trim()).filter(Boolean))].sort((a, b) => ((folderSort[a] ?? 1e9) - (folderSort[b] ?? 1e9)) || a.localeCompare(b, "pt-BR"));
+// ordem manual dos sons: coluna "sort"; sem ela, ordem de criação
+const soundKey = s => s.sort ?? (1e6 + sounds.indexOf(s));
+const bySort = (a, b) => soundKey(a) - soundKey(b);
 function ytId(u){
   try {
     const url = new URL(u.trim());
@@ -558,7 +561,7 @@ function renderGM(){
   const f = filter.toLowerCase();
   const match = s => (!f || s.name.toLowerCase().includes(f) || (s.folder || "").toLowerCase().includes(f))
     && (!curFolder || (curFolder === "__fav" ? s.favorite : (s.folder || "") === curFolder));
-  const order = (a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0);
+  const order = bySort;
   const music = sounds.filter(s => s.kind === "music" && match(s)).sort(order);
   const amb = sounds.filter(s => s.kind === "ambient" && match(s)).sort(order);
   const sfx = sounds.filter(s => s.kind === "sfx" && match(s)).sort(order);
@@ -568,7 +571,7 @@ function renderGM(){
   const star = s => `<button class="icon-btn star ${s.favorite ? "on" : ""}" data-fav="${s.id}" title="${s.favorite ? "Tirar dos favoritos" : "Favoritar"}" aria-label="${s.favorite ? "Tirar dos favoritos" : "Favoritar"} ${esc(s.name)}" aria-pressed="${!!s.favorite}">${s.favorite ? ICON.starOn : ICON.star}</button>`;
   const tools = s => `<span class="tools">${star(s)}<button class="icon-btn" data-prev="${s.id}" title="Pré-ouvir só aqui" aria-label="Pré-ouvir ${esc(s.name)}" style="${pv === s.id ? "color:var(--brass)" : ""}">${ICON.ear}</button><button class="icon-btn" data-menu="${s.id}" title="Editar, mover de pasta ou de tipo" aria-label="Editar ${esc(s.name)}">${ICON.dots}</button></span>`;
   const count = k => k === "" ? sounds.length : k === "__fav" ? sounds.filter(s => s.favorite).length : sounds.filter(s => (s.folder || "") === k).length;
-  const chip = (k, label) => { const fc = safeColor(folderColors[k]); return `<button class="fchip ${fc ? "colored" : ""}" data-folder="${esc(k)}" aria-pressed="${curFolder === k}"${fc ? ` style="--c:${fc}"` : ""}>${label} <span>${count(k)}</span></button>`; };
+  const chip = (k, label) => { const fc = safeColor(folderColors[k]); return `<button class="fchip ${fc ? "colored" : ""}" data-folder="${esc(k)}"${k && k !== "__fav" ? ' draggable="true"' : ""} aria-pressed="${curFolder === k}"${fc ? ` style="--c:${fc}"` : ""}>${label} <span>${count(k)}</span></button>`; };
   const keep = document.activeElement?.id;
   v.innerHTML = `
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
@@ -589,24 +592,24 @@ function renderGM(){
     <span class="swatches" id="fColors" role="radiogroup" aria-label="Cor da pasta" style="margin:0">${COLORS.map(([c, n]) => `<button type="button" role="radio" class="swatch-btn ${c ? "" : "none"}" data-fcolor="${c}" title="${n}" aria-label="${n}" aria-checked="${(safeColor(folderColors[curFolder]) || "") === c}" style="${c ? "background:" + c : ""}"></button>`).join("")}</span>
   </div>` : ""}
   <div class="board">
-    <section class="sec music-sec">
-      <div class="sec-head"><span class="swatch"></span><h2>Trilha</h2><span class="hint">uma por vez, em loop</span></div>
-      ${music.length ? `<div class="list">${music.map(s => { const on = live.music?.sid === s.id;
-        return `<div class="row ${on ? "active" : ""} ${safeColor(s.color) ? "colored" : ""}"${look(s)}><button class="play" data-music="${s.id}" aria-label="${on ? "Parar" : "Tocar"} ${esc(s.name)}">${on ? ICON.stop : ICON.play}</button>
+    <section class="sec music-sec" data-dropkind="music">
+      <div class="sec-head"><span class="swatch"></span><h2>Trilha</h2><span class="hint">uma por vez, em loop · arraste para reorganizar</span></div>
+      ${music.length ? `<div class="list scroll-box">${music.map(s => { const on = live.music?.sid === s.id;
+        return `<div class="row ${on ? "active" : ""} ${safeColor(s.color) ? "colored" : ""}" draggable="true" data-drag="${s.id}"${look(s)}><button class="play" data-music="${s.id}" aria-label="${on ? "Parar" : "Tocar"} ${esc(s.name)}">${on ? ICON.stop : ICON.play}</button>
         <span class="name">${emo(s)}${esc(s.name)}${yt(s)}${on ? '<span class="eq"><i></i><i></i><i></i></span>' : ""}</span><span class="meta">${fmtDur(s.duration)}</span>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhuma trilha aqui." : "Nenhuma trilha ainda. Use “Adicionar sons”."}</div>`}
       ${live.music ? `<div class="live-vol">Volume da trilha <input type="range" id="musicVol" min="0" max="1" step="0.02" value="${live.music.vol ?? .8}"></div>` : ""}
     </section>
-    <section class="sec amb-sec">
+    <section class="sec amb-sec" data-dropkind="ambient">
       <div class="sec-head"><span class="swatch"></span><h2>Ambiente</h2><span class="hint">camadas somam, em loop</span></div>
-      ${amb.length ? `<div class="amb-grid">${amb.map(s => { const on = !!live.amb?.[s.id];
-        return `<div class="amb ${on ? "on" : ""} ${safeColor(s.color) ? "colored" : ""}"${look(s)}><button class="toggle" data-amb="${s.id}" aria-pressed="${on}"><span class="sw"></span><span>${emo(s)}${esc(s.name)}</span></button>
+      ${amb.length ? `<div class="amb-grid scroll-box">${amb.map(s => { const on = !!live.amb?.[s.id];
+        return `<div class="amb ${on ? "on" : ""} ${safeColor(s.color) ? "colored" : ""}" draggable="true" data-drag="${s.id}"${look(s)}><button class="toggle" data-amb="${s.id}" aria-pressed="${on}"><span class="sw"></span><span>${emo(s)}${esc(s.name)}</span></button>
         ${on ? `<input type="range" min="0" max="1" step="0.02" value="${live.amb[s.id].vol ?? .7}" data-ambvol="${s.id}" aria-label="Volume de ${esc(s.name)}">` : `<span class="sub">${fmtDur(s.duration) || "&nbsp;"}${yt(s)}</span>`}
         ${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum ambiente aqui." : "Nenhum ambiente ainda."}</div>`}
     </section>
-    <section class="sec sfx-sec">
+    <section class="sec sfx-sec" data-dropkind="sfx">
       <div class="sec-head"><span class="swatch"></span><h2>Efeitos</h2><span class="hint">toca uma vez para todos · atalhos no teclado</span></div>
-      ${sfx.length ? `<div class="pads">${sfx.map((s, i) => { const k = KEYS[i];
-        return `<div class="pad-wrap"><button class="pad ${s.favorite ? "fav" : ""} ${safeColor(s.color) ? "colored" : ""}" data-id="${s.id}" data-sfx="${s.id}"${safeColor(s.color) ? ` style="width:100%;--c:${safeColor(s.color)}"` : ' style="width:100%"'}>${k ? `<span class="key">${k}</span>` : ""}${emo(s, "pemoji")}<span class="pname">${esc(s.name)}${yt(s)}</span></button>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum efeito aqui." : "Nenhum efeito ainda."}</div>`}
+      ${sfx.length ? `<div class="pads scroll-box">${sfx.map((s, i) => { const k = KEYS[i];
+        return `<div class="pad-wrap" draggable="true" data-drag="${s.id}"><button class="pad ${s.favorite ? "fav" : ""} ${safeColor(s.color) ? "colored" : ""}" data-id="${s.id}" data-sfx="${s.id}"${safeColor(s.color) ? ` style="width:100%;--c:${safeColor(s.color)}"` : ' style="width:100%"'}>${k ? `<span class="key">${k}</span>` : ""}${emo(s, "pemoji")}<span class="pname">${esc(s.name)}${yt(s)}</span></button>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum efeito aqui." : "Nenhum efeito ainda."}</div>`}
     </section>
   </div>`;
   $("#upBtn").onclick = openUpload;
@@ -626,7 +629,7 @@ function renderGM(){
       const old = curFolder;
       const {error} = await sb.from("sounds").update({folder: nv}).eq("folder", old);
       if (error) return toast("Não renomeei: " + error.message);
-      if (folderColors[old]) { await sb.from("folders").upsert({name: nv, color: folderColors[old]}); await sb.from("folders").delete().eq("name", old); }
+      if (folderColors[old] || folderSort[old] != null) { const row = {name: nv, color: folderColors[old] || null}; if (folderSort[old] != null) row.sort = folderSort[old]; await sb.from("folders").upsert(row); await sb.from("folders").delete().eq("name", old); }
       curFolder = nv; try { localStorage.setItem("mesa.folder", nv); } catch {}
       toast("Pasta renomeada para “" + nv + "”.");
     };
@@ -647,7 +650,7 @@ function renderGM(){
     const b = e.target.closest("[data-fcolor]"); if (!b) return;
     const color = b.dataset.fcolor || null, name = curFolder;
     folderColors = {...folderColors, [name]: color}; render();
-    const {error} = color ? await sb.from("folders").upsert({name, color}) : await sb.from("folders").delete().eq("name", name);
+    const {error} = await sb.from("folders").upsert({name, color});
     if (error) toast("Não salvei a cor: " + error.message);
   };
   v.querySelectorAll("[data-folder]").forEach(b => b.onclick = () => { curFolder = b.dataset.folder; try { localStorage.setItem("mesa.folder", curFolder); } catch {} render(); });
@@ -665,6 +668,100 @@ $("#view").addEventListener("click", e => {
   else if (b.dataset.prev) A.previewToggle(s);
   else if (b.dataset.menu) showMenu(s, b);
 });
+
+// ---------- arrastar e soltar (só o mestre) ----------
+let dragSid = null, dragFolder = null, downEl = null;
+const view = () => $("#view");
+const clearMarks = () => view().querySelectorAll(".drop-before,.drop-after,.drop-into,.is-dragging").forEach(el => el.classList.remove("drop-before", "drop-after", "drop-into", "is-dragging"));
+document.addEventListener("pointerdown", e => { downEl = e.target; }, true);
+function endDrag(){
+  dragSid = dragFolder = null; clearMarks();
+  dragging = false; if (pendingRender) { pendingRender = false; render(); }
+}
+$("#view").addEventListener("dragstart", e => {
+  if (!isGM) return;
+  if (downEl?.matches?.("input,textarea")) { e.preventDefault(); return; }
+  const item = e.target.closest?.("[data-drag]"), chip = e.target.closest?.(".fchip[draggable]");
+  if (item) { dragSid = item.dataset.drag; e.dataTransfer.setData("text/x-sound", dragSid); item.classList.add("is-dragging"); }
+  else if (chip) { dragFolder = chip.dataset.folder; e.dataTransfer.setData("text/x-folder", dragFolder); chip.classList.add("is-dragging"); }
+  else return;
+  e.dataTransfer.effectAllowed = "move"; dragging = true;
+});
+$("#view").addEventListener("dragend", endDrag);
+function dropTarget(e){
+  const t = e.target;
+  if (dragSid) {
+    const chip = t.closest?.(".fchip"); if (chip) return {type:"folder", el:chip};
+    const it = t.closest?.("[data-drag]");
+    if (it && it.dataset.drag !== dragSid) {
+      const r = it.getBoundingClientRect(), row = it.classList.contains("row");
+      const after = row ? e.clientY > r.top + r.height / 2 : e.clientX > r.left + r.width / 2;
+      return {type:"item", el:it, after};
+    }
+    const sec = t.closest?.("[data-dropkind]"); if (sec) return {type:"section", el:sec};
+  } else if (dragFolder != null) {
+    const chip = t.closest?.(".fchip[draggable]");
+    if (chip && chip.dataset.folder !== dragFolder) { const r = chip.getBoundingClientRect(); return {type:"fchip", el:chip, after: e.clientX > r.left + r.width / 2}; }
+  }
+  return null;
+}
+$("#view").addEventListener("dragover", e => {
+  if (!dragSid && dragFolder == null) return;
+  const d = dropTarget(e);
+  view().querySelectorAll(".drop-before,.drop-after,.drop-into").forEach(el => el.classList.remove("drop-before", "drop-after", "drop-into"));
+  if (!d) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = "move";
+  d.el.classList.add(d.type === "item" || d.type === "fchip" ? (d.after ? "drop-after" : "drop-before") : "drop-into");
+  // rolagem automática perto das bordas da lista
+  const box = e.target.closest?.(".scroll-box");
+  if (box) { const r = box.getBoundingClientRect(); if (e.clientY < r.top + 40) box.scrollTop -= 12; else if (e.clientY > r.bottom - 40) box.scrollTop += 12; }
+});
+$("#view").addEventListener("drop", async e => {
+  if (!dragSid && dragFolder == null) return;
+  e.preventDefault();
+  const d = dropTarget(e), sid = dragSid, fname = dragFolder;
+  endDrag();
+  if (!d) return;
+  if (fname != null) return moveFolder(fname, d.el.dataset.folder, d.after);
+  const s = byId(sid); if (!s) return;
+  if (d.type === "folder") {
+    const k = d.el.dataset.folder;
+    if (k === "__fav") { if (!s.favorite) toggleFav(s); return; }
+    const folder = k || null; if ((s.folder || null) === folder) return;
+    s.folder = folder; render();
+    const {error} = await sb.from("sounds").update({folder}).eq("id", s.id);
+    if (error) toast("Não movi: " + error.message); else toast(`“${s.name}” → ${folder ? "pasta " + folder : "sem pasta"}.`);
+    return;
+  }
+  const kind = d.type === "item" ? byId(d.el.dataset.drag)?.kind : d.el.dataset.dropkind;
+  if (!kind) return;
+  const list = sounds.filter(x => x.kind === kind && x.id !== s.id).sort(bySort);
+  let at = list.length;
+  if (d.type === "item") { at = list.findIndex(x => x.id === d.el.dataset.drag); if (at < 0) at = list.length; else if (d.after) at++; }
+  list.splice(at, 0, s);
+  const kindChanged = s.kind !== kind;
+  const changes = [];
+  list.forEach((x, i) => { if (x.sort !== i || (x === s && kindChanged)) changes.push([x, i]); });
+  for (const [x, i] of changes) x.sort = i;
+  if (kindChanged) {
+    s.kind = kind;
+    if (live.music?.sid === s.id || live.amb?.[s.id]) { const amb = {...(live.amb || {})}; delete amb[s.id]; saveLive({music: live.music?.sid === s.id ? null : live.music, amb}); }
+    if (joined) { A.sync(); A.preloadSfx(); }
+  }
+  render();
+  const res = await Promise.all(changes.map(([x, i]) => sb.from("sounds").update(x === s && kindChanged ? {sort:i, kind} : {sort:i}).eq("id", x.id)));
+  const err = res.find(r => r.error)?.error;
+  if (err) toast("Não salvei a ordem: " + err.message);
+  else if (kindChanged) toast(`“${s.name}” agora é ${KIND_BTNS.find(k => k[0] === kind)[1].toLowerCase()}.`);
+});
+async function moveFolder(name, target, after){
+  const list = folders().filter(n => n !== name);
+  let at = list.indexOf(target); if (at < 0) return; if (after) at++;
+  list.splice(at, 0, name);
+  folderSort = Object.fromEntries(list.map((n, i) => [n, i])); render();
+  const {error} = await sb.from("folders").upsert(list.map((n, i) => ({name:n, sort:i, color: folderColors[n] || null})));
+  if (error) toast("Não salvei a ordem das pastas: " + error.message);
+}
 function setMyVol(v){ myVol = v; A.setMaster(v); try { localStorage.setItem("mesa.vol", String(v)); } catch {} }
 function renderPlayer(){
   const v = $("#view");
@@ -720,9 +817,10 @@ async function loadSounds(){
   sounds = data; if (joined) { A.sync(); A.preloadSfx(); } render();
 }
 async function loadFolders(){
-  const {data, error} = await sb.from("folders").select("name,color");
+  const {data, error} = await sb.from("folders").select("*");
   if (error) return; // tabela ainda não existe: segue sem cores
-  folderColors = Object.fromEntries(data.map(f => [f.name, f.color])); render();
+  folderColors = Object.fromEntries(data.map(f => [f.name, f.color]));
+  folderSort = Object.fromEntries(data.filter(f => f.sort != null).map(f => [f.name, f.sort])); render();
 }
 async function loadLive(){
   const {data} = await sb.from("live_state").select("*").eq("id", 1).maybeSingle();
