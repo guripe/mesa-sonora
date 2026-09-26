@@ -822,6 +822,74 @@ function toggleDicePanel(){
   };
 }
 document.addEventListener("click", e => { const p = $("#dicePanel"); if (p && !p.contains(e.target) && !e.target.closest("#diceBtn")) p.remove(); });
+
+// sons dos dados: sintetizados na hora, só no PC do mestre
+const DiceSnd = {
+  ctx: null, out: null,
+  init(){
+    if (!this.ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return false; this.ctx = new C(); this.out = this.ctx.createGain(); this.out.connect(this.ctx.destination); }
+    if (this.ctx.state === "suspended") this.ctx.resume();
+    this.out.gain.value = Math.max(0.05, myVol);
+    return true;
+  },
+  noise(len){ const c = this.ctx, b = c.createBuffer(1, Math.ceil(c.sampleRate * len), c.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; },
+  click(t, freq, vol, len = .03){
+    const c = this.ctx, src = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    src.buffer = this.noise(len); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 6;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + len);
+    src.connect(f).connect(g).connect(this.out); src.start(t);
+  },
+  tone(t, freq, len, vol, type = "triangle", endFreq){
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t); if (endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, t + len);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .012); g.gain.exponentialRampToValueAtTime(.001, t + len);
+    o.connect(g).connect(this.out); o.start(t); o.stop(t + len + .05);
+  },
+  rattle(dur, n){ // dados chacoalhando e quicando na mesa
+    if (!this.init()) return; const t0 = this.ctx.currentTime;
+    const hits = Math.min(60, 14 + n * 8);
+    for (let i = 0; i < hits; i++) { const x = Math.pow(Math.random(), 1.6) * dur; this.click(t0 + x, 1800 + Math.random() * 3200, .25 + Math.random() * .3 * (1 - x / dur), .018 + Math.random() * .02); }
+  },
+  land(){ // clac do dado parando
+    if (!this.init()) return; const t = this.ctx.currentTime;
+    this.click(t, 1200 + Math.random() * 600, .7, .05); this.tone(t, 180, .09, .35, "sine", 90);
+  },
+  crit(){ // fanfarra + brilho
+    if (!this.init()) return; const t = this.ctx.currentTime + .05;
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => { this.tone(t + i * .09, f, .5, .22, "square"); this.tone(t + i * .09, f * 2, .6, .08, "sine"); });
+    [1046.5, 1318.5, 1568].forEach(f => this.tone(t + .4, f, 1.4, .16, "triangle"));
+    this.tone(t + .4, 261.6, 1.2, .25, "sawtooth");
+    for (let i = 0; i < 18; i++) this.tone(t + .45 + i * .05, 2000 + Math.random() * 3000, .25, .05, "sine");
+  },
+  fumble(){ // "uó uó uó uóóó" triste
+    if (!this.init()) return; const c = this.ctx, t = c.currentTime + .05;
+    const notes = [[311, .32], [293.7, .32], [277.2, .32], [261.6, 1.1]];
+    let at = t;
+    for (const [f, len] of notes) {
+      const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
+      o.type = "sawtooth"; o.frequency.setValueAtTime(f, at);
+      lp.type = "lowpass"; lp.frequency.setValueAtTime(500, at); lp.frequency.linearRampToValueAtTime(1400, at + .08); lp.frequency.linearRampToValueAtTime(600, at + len);
+      g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(.3, at + .04); g.gain.setValueAtTime(.3, at + len - .08); g.gain.linearRampToValueAtTime(0, at + len);
+      if (len > .5) { const lfo = c.createOscillator(), lg = c.createGain(); lfo.frequency.value = 6; lg.gain.value = 7; lfo.connect(lg).connect(o.frequency); lfo.start(at + .2); lfo.stop(at + len); }
+      o.connect(lp).connect(g).connect(this.out); o.start(at); o.stop(at + len + .02);
+      at += len + .04;
+    }
+    this.tone(t, 70, .5, .4, "sine", 40);
+  },
+};
+function critBurst(st, el){
+  const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const fx = document.createElement("div"); fx.className = "crit-fx"; fx.style.left = cx + "px"; fx.style.top = cy + "px";
+  let h = '<span class="crit-rays"></span><span class="crit-ring"></span>';
+  for (let i = 0; i < 34; i++) { const a = Math.random() * Math.PI * 2, d = 90 + Math.random() * 190; h += `<i style="--x:${Math.cos(a) * d}px;--y:${Math.sin(a) * d}px;--s:${.5 + Math.random()};--d:${Math.random() * .25}s"></i>`; }
+  fx.innerHTML = h; st.appendChild(fx); st.classList.add("flash-gold");
+}
+function fumbleFx(st, el){
+  st.classList.add("shake-red");
+  const r = el.getBoundingClientRect();
+  const sk = document.createElement("div"); sk.className = "fumble-skull"; sk.textContent = "💀";
+  sk.style.left = (r.left + r.width / 2) + "px"; sk.style.top = r.top + "px"; st.appendChild(sk);
+}
 function rollDice(){
   const dice = [];
   for (const d of [...DICE].reverse()) for (let i = 0; i < (diceCounts[d] || 0); i++) dice.push({d, v: 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * d)});
@@ -838,6 +906,7 @@ function rollDice(){
   document.body.appendChild(st);
   const els = [...st.querySelectorAll(".die.big")];
   const t0 = performance.now(), dur = 1100;
+  DiceSnd.rattle(dur / 1000 + dice.length * .06, dice.length);
   const tick = now => {
     let done = true;
     els.forEach((el, i) => {
@@ -845,7 +914,7 @@ function rollDice(){
       const n = el.querySelector(".die-n");
       if (now - t0 < end) { done = false; if (Math.random() < .5) n.textContent = 1 + Math.floor(Math.random() * dice[i].d); }
       else if (!el.classList.contains("landed")) {
-        n.textContent = dice[i].v; el.classList.remove("rolling"); el.classList.add("landed");
+        n.textContent = dice[i].v; el.classList.remove("rolling"); el.classList.add("landed"); DiceSnd.land();
         if (dice[i].d === 20 && dice[i].v === 20) el.classList.add("crit");
         if (dice[i].d === 20 && dice[i].v === 1) el.classList.add("fumble");
       }
@@ -853,8 +922,11 @@ function rollDice(){
     if (!done) return requestAnimationFrame(tick);
     const sum = dice.reduce((a, x) => a + x.v, 0) + mod;
     const d20s = dice.filter(x => x.d === 20);
-    const tag = d20s.some(x => x.v === 20) ? '<span class="crit-tag">20 natural!</span>' : d20s.some(x => x.v === 1) ? '<span class="fumble-tag">1 natural…</span>' : "";
-    st.querySelector(".dice-result").innerHTML = `<div class="dice-total">${sum}</div><div class="sub">${esc(formula)} → ${dice.map(x => x.v).join(" + ")}${mod ? (mod > 0 ? " + " : " − ") + Math.abs(mod) : ""}</div>${tag}`;
+    const tag = d20s.some(x => x.v === 20) ? '<span class="crit-tag">⚔️ CRÍTICO! 20 natural ⚔️</span>' : d20s.some(x => x.v === 1) ? '<span class="fumble-tag">💀 FALHA CRÍTICA… 1 natural</span>' : "";
+    const critEl = els.find((el, i) => dice[i].d === 20 && dice[i].v === 20), fumEl = els.find((el, i) => dice[i].d === 20 && dice[i].v === 1);
+    if (critEl) { DiceSnd.crit(); critBurst(st, critEl); }
+    else if (fumEl) { DiceSnd.fumble(); fumbleFx(st, fumEl); }
+    st.querySelector(".dice-result").innerHTML = `<div class="dice-total ${critEl ? "is-crit" : fumEl ? "is-fumble" : ""}">${sum}</div><div class="sub">${esc(formula)} → ${dice.map(x => x.v).join(" + ")}${mod ? (mod > 0 ? " + " : " − ") + Math.abs(mod) : ""}</div>${tag}`;
   };
   requestAnimationFrame(tick);
   st.onclick = e => {
