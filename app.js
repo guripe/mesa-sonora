@@ -578,6 +578,7 @@ function renderGM(){
     <button class="btn primary" id="upBtn">${ICON.up} Adicionar sons</button>
     <input class="search" id="search" type="search" placeholder="Buscar som ou pasta…" value="${esc(filter)}" aria-label="Buscar som">
     <span style="flex:1"></span>
+    <a class="btn dice-btn" href="/mapa.html" target="mesa-mapa" title="Abre o mapa com grid numa aba nova">${MAP_ICON} Mapa</a>
     <button class="btn dice-btn" id="diceBtn" aria-haspopup="dialog" title="Rolar dados (só você vê)">${DICE_ICON} Rolar dados</button>
     <span style="flex:1"></span>
     <label class="sub" style="display:flex;align-items:center;gap:8px">${ICON.vol}<input type="range" id="myVol" min="0" max="1" step="0.05" value="${myVol}" aria-label="Volume só no seu PC"></label>
@@ -768,6 +769,7 @@ async function moveFolder(name, target, after){
 
 // ---------- rolador de dados (só o mestre vê) ----------
 const DICE = [4, 6, 8, 10, 12, 20];
+const MAP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14m6-12v14"/></svg>';
 const DICE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2 21 7v10l-9 5-9-5V7z"/><path d="M12 2v7m0 0-9-2m9 2 9-2m-9 2-5 8m5-8 5 8M3 17h18M7 17l5 5 5-5"/></svg>';
 const DIE_SHAPE = {
   4: "polygon(50% 4%, 97% 90%, 3% 90%)",
@@ -949,6 +951,7 @@ function renderPlayer(){
         <div class="last-sfx" id="pSfx"></div>
       </div>
       <div class="myvol">${ICON.vol}<input type="range" id="myVol" min="0" max="1" step="0.02" aria-label="Seu volume"><span class="sub">seu volume</span></div>
+      <a class="btn" href="/mapa.html" target="mesa-mapa" style="align-self:flex-start">${MAP_ICON} Abrir o mapa da mesa</a>
       <p class="sub" id="pHint"></p>
     </div>`;
     $("#myVol").value = myVol;

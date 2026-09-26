@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa · Mesa Sonora</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317130f'/%3E%3Cpath d='M16 5l9 5v11l-9 5-9-5V10z' stroke='%23d0a54c' stroke-width='2.2' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Almendra:wght@400;700&family=Alegreya+Sans:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#17130f; --bg2:#1f1914; --card:#2a221b; --card2:#332a21; --line:#4a3d30;
+  --ink:#eee2c9; --ink2:#b9a88a; --ink3:#86765d;
+  --brass:#d0a54c; --brass-ink:#1c150c;
+  --display:"Almendra", "Palatino Linotype", Georgia, serif;
+  --body:"Alegreya Sans", "Segoe UI", system-ui, sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;overflow:hidden;background:#0d0b09;color:var(--ink);font:15px/1.4 var(--body)}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+#board{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+#board.panning{cursor:grabbing}
+#board.t-ruler,#board.t-draw,#board.t-fog{cursor:crosshair}
+#board.t-erase{cursor:cell}
+
+.topbar{position:fixed;top:10px;left:74px;right:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;pointer-events:none;z-index:5}
+.topbar > *{pointer-events:auto}
+.title{font:700 22px/1 var(--display);color:var(--brass);padding:8px 12px;background:rgba(23,19,15,.88);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(4px)}
+.title small{font:500 12px/1 var(--body);color:var(--ink3);letter-spacing:.08em;text-transform:uppercase;margin-left:6px}
+.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:rgba(42,34,27,.92);padding:7px 12px;border-radius:8px;font-weight:500;backdrop-filter:blur(4px)}
+.btn:hover{background:var(--card2)}
+.btn.primary{background:var(--brass);color:var(--brass-ink);border-color:var(--brass);font-weight:700}
+.btn.small{padding:5px 9px;font-size:13px}
+.btn.danger{color:#f0a090}
+.btn svg{width:17px;height:17px;flex:none}
+.btn[aria-pressed=true]{border-color:var(--brass);color:var(--brass)}
+.zoom{display:flex;align-items:center;gap:4px}
+.zoom span{min-width:46px;text-align:center;font-size:13px;color:var(--ink2);font-variant-numeric:tabular-nums}
+
+.tools{position:fixed;left:10px;top:10px;display:flex;flex-direction:column;gap:4px;padding:6px;background:rgba(23,19,15,.92);border:1px solid var(--line);border-radius:12px;z-index:6;backdrop-filter:blur(4px)}
+.tool{width:44px;height:44px;border-radius:9px;border:1px solid transparent;background:transparent;display:grid;place-items:center;color:var(--ink2);position:relative}
+.tool svg{width:24px;height:24px}
+.tool:hover{background:var(--card);color:var(--ink)}
+.tool[aria-pressed=true]{background:var(--brass);color:var(--brass-ink)}
+.tool .k{position:absolute;right:3px;bottom:1px;font-size:10px;font-weight:700;opacity:.6}
+.tools hr{width:100%;border:0;border-top:1px solid var(--line);margin:3px 0}
+
+.flyout{position:fixed;left:70px;background:rgba(31,25,20,.97);border:1px solid var(--line);border-radius:12px;padding:12px;z-index:6;width:250px;box-shadow:0 14px 30px rgba(0,0,0,.45)}
+.flyout h4{margin:0 0 8px;font:700 17px/1 var(--display);color:var(--brass)}
+.flyout .row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;align-items:center}
+.flyout .lbl{font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;margin:2px 0 6px}
+.seg{display:flex;flex-wrap:wrap;gap:4px}
+.seg button{padding:6px 10px;border-radius:7px;border:1px solid var(--line);background:var(--card);font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.seg button svg{width:16px;height:16px}
+.seg button[aria-pressed=true]{background:var(--brass);color:var(--brass-ink);border-color:var(--brass);font-weight:700}
+.sw{width:24px;height:24px;border-radius:50%;border:2px solid transparent;box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)}
+.sw[aria-pressed=true]{border-color:#fff}
+input[type=range]{accent-color:var(--brass);width:100%}
+.hint{font-size:12px;color:var(--ink3);margin:0}
+
+.panel{position:fixed;right:10px;top:60px;width:320px;max-height:calc(100vh - 70px);overflow:auto;background:rgba(31,25,20,.97);border:1px solid var(--line);border-radius:14px;padding:16px;z-index:7;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.panel h3{margin:0 0 12px;font:700 22px/1 var(--display);color:var(--brass);display:flex;align-items:center}
+.panel h3 button{margin-left:auto}
+.panel label{display:block;font-size:13px;color:var(--ink2);margin:10px 0 4px}
+.panel input[type=text],.panel input[type=url],.panel input[type=number]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.panel .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.panel .sect{border-top:1px solid var(--line);margin-top:14px;padding-top:6px}
+.panel .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.chk{display:flex!important;align-items:center;gap:8px;cursor:pointer}
+.chk input{accent-color:var(--brass);width:16px;height:16px}
+
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line);padding:9px 16px;border-radius:10px;z-index:20;box-shadow:0 10px 26px rgba(0,0,0,.4)}
+.empty-map{position:fixed;inset:0;display:grid;place-items:center;pointer-events:none;z-index:1}
+.empty-map div{pointer-events:auto;text-align:center;background:rgba(23,19,15,.9);border:1px dashed var(--line);border-radius:14px;padding:22px 26px;max-width:380px;color:var(--ink2)}
+.empty-map b{display:block;font:700 22px/1.1 var(--display);color:var(--brass);margin-bottom:6px}
+.status{position:fixed;right:10px;bottom:10px;font-size:12px;color:var(--ink3);background:rgba(23,19,15,.8);padding:4px 10px;border-radius:8px;z-index:5}
+.gate{position:fixed;inset:0;display:grid;place-items:center;background:#0d0b09;z-index:30;color:var(--ink2);padding:16px;text-align:center}
+@media (max-width:640px){.title small{display:none}.panel{left:10px;right:10px;width:auto}}
+</style>
+</head>
+<body>
+<canvas id="board" aria-label="Mapa de batalha"></canvas>
+<nav class="tools" id="tools" aria-label="Ferramentas"></nav>
+<div class="topbar" id="topbar"></div>
+<div id="flyout"></div>
+<div id="panel"></div>
+<div class="status" id="status">conectando…</div>
+<div class="gate" id="gate">Carregando o mapa…</div>
+<script src="/vendor/supabase.js"></script>
+<script src="/mapa.js"></script>
+</body>
+</html>

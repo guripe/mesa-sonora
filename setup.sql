@@ -114,3 +114,22 @@ end $$;
 -- v5: ordem manual de sons e pastas (arrastar e soltar)
 alter table public.sounds add column if not exists sort real;
 alter table public.folders add column if not exists sort real;
+
+-- v6: mapa de batalha (grid, tokens, névoa, desenhos)
+create table if not exists public.map_state (
+  id int primary key,
+  scene jsonb,
+  tokens jsonb not null default '[]'::jsonb,
+  fog jsonb,
+  drawings jsonb not null default '[]'::jsonb,
+  updated_at timestamptz default now()
+);
+insert into public.map_state (id) values (1) on conflict (id) do nothing;
+alter table public.map_state enable row level security;
+drop policy if exists "todos leem o mapa" on public.map_state;
+drop policy if exists "mestre edita o mapa" on public.map_state;
+create policy "todos leem o mapa" on public.map_state for select using (true);
+create policy "mestre edita o mapa" on public.map_state for all to authenticated using (true) with check (true);
+do $$ begin
+  begin alter publication supabase_realtime add table public.map_state; exception when duplicate_object then null; end;
+end $$;
