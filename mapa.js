@@ -41,6 +41,8 @@ const lastSave = {};                                 // interação em andamento
 let rulers = {};                                 // réguas ao vivo {key: {a, b}}
 let tokLive = {};                                // posições temporárias vindas por broadcast
 let selTok = null;
+let myNick = ""; try { myNick = localStorage.getItem("mesa.nick") || ""; } catch {}
+let peersOnMap = [];                             // nomes de quem está no mapa agora
 const myKey = (crypto.randomUUID?.() || String(Math.random())).slice(0, 10);
 let spaceDown = false;
 
@@ -149,9 +151,12 @@ function paint(){
   if (drag?.kind === "draw" && drag.shape) paintDrawing(drag.shape, true);
   // tokens
   const ts = tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t);
+  for (const t of ts) if (isGM || !t.h) paintAura(t);
+  if (isGM) for (const t of ts) if (t.vi?.on) paintVisionGM(t);
   for (const t of ts) if (isGM || !t.h) paintToken(t);
-  // névoa
+  // névoa e visão
   if (fog.on) paintFog();
+  if (!isGM) paintVisionPlayer();
   if (drag?.kind === "fogrect") { const {a, b} = drag; ctx.strokeStyle = opt.fog === "reveal" ? "#ffe28a" : "#e0735e"; ctx.setLineDash([8 / cam.z, 6 / cam.z]); ctx.lineWidth = 2 / cam.z; ctx.strokeRect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])); ctx.setLineDash([]); }
   const brushAt = drag?.kind === "fogbrush" ? drag.at : (!drag && tool === "fog" && isGM && opt.fogShape === "brush" ? hoverFog : null);
   if (brushAt) { const [a, b] = cellAt(...brushAt); ctx.beginPath(); for (const [ca, cb] of cellsInRange(a, b, opt.brush)) cellPath(ctx, ca, cb); ctx.strokeStyle = opt.fog === "reveal" ? "#ffe28a" : "#e0735e"; ctx.lineWidth = 2 / cam.z; ctx.stroke(); }
@@ -184,24 +189,90 @@ function label(x, y, text){
   ctx.beginPath(); ctx.roundRect ? ctx.roundRect(lx, ly, w, h, 6 / cam.z) : ctx.rect(lx, ly, w, h); ctx.fill(); ctx.stroke();
   ctx.fillStyle = "#eee2c9"; ctx.textBaseline = "middle"; ctx.fillText(text, lx + 7 / cam.z, ly + h / 2);
 }
+const unitPx = u => u / (G().unit || 1) * G().size;   // metros → pixels
+const dirVec = a => [Math.sin(a * Math.PI / 180), -Math.cos(a * Math.PI / 180)]; // 0° = para cima
+const tokR = t => (t.s || 1) * G().size / 2 * .88;
+const owns = t => !!t.o && (t.o === "*" || (!!myNick && t.o.toLowerCase() === myNick.toLowerCase()));
+function paintAura(t){
+  const au = t.au; if (!au?.on || !(au.d > 0)) return;
+  const R = unitPx(au.d) / 2;
+  ctx.save(); ctx.fillStyle = au.c || "#ff0000"; ctx.strokeStyle = au.c || "#ff0000"; ctx.lineWidth = 2 / cam.z;
+  ctx.beginPath();
+  if (au.f === "square") ctx.rect(t.x - R, t.y - R, R * 2, R * 2);
+  else if (au.f === "cells") { const [a, b] = cellAt(t.x, t.y); const n = Math.max(1, Math.round(au.d / 2 / (G().unit || 1))) + 1; for (const [ca, cb] of cellsInRange(a, b, n)) cellPath(ctx, ca, cb); }
+  else ctx.arc(t.x, t.y, R, 0, Math.PI * 2);
+  ctx.globalAlpha = (t.h ? .5 : 1) * .2; ctx.fill(); ctx.globalAlpha = t.h ? .5 : .85; if (au.f !== "cells") ctx.stroke();
+  ctx.restore();
+}
+function visionPath(c, t){
+  const v = t.vi, R = unitPx(v.r || 9), r0 = tokR(t);
+  c.moveTo(t.x + r0 * 1.05, t.y); c.arc(t.x, t.y, r0 * 1.05, 0, Math.PI * 2);   // o próprio token sempre aparece
+  if (v.t === "circle") { c.moveTo(t.x + R, t.y); c.arc(t.x, t.y, R, 0, Math.PI * 2); return; }
+  const half = (v.ang || 90) / 2, a0 = ((t.a || 0) - 90 - half) * Math.PI / 180, a1 = ((t.a || 0) - 90 + half) * Math.PI / 180;
+  c.moveTo(t.x, t.y); c.arc(t.x, t.y, R, a0, a1); c.closePath();
+}
+function paintVisionGM(t){ // o mestre vê o cone só como contorno
+  ctx.save(); ctx.beginPath(); visionPath(ctx, t);
+  ctx.fillStyle = "rgba(255,236,170,.07)"; ctx.fill(); ctx.strokeStyle = "rgba(255,226,138,.55)"; ctx.setLineDash([6 / cam.z, 5 / cam.z]); ctx.lineWidth = 1.5 / cam.z; ctx.stroke(); ctx.restore();
+}
+let visCv = document.createElement("canvas"), vctx = visCv.getContext("2d");
+function viewers(){ // tokens cuja visão vale para este jogador
+  const vt = tokens.filter(t => t.vi?.on && t.o);
+  const mine = vt.filter(owns);
+  return mine.length ? mine : vt;                // sem token próprio: vê o que o grupo vê
+}
+function paintVisionPlayer(){
+  const vs = viewers(); if (!vs.length) return;
+  const d = devicePixelRatio || 1;
+  if (visCv.width !== cv.width || visCv.height !== cv.height) { visCv.width = cv.width; visCv.height = cv.height; }
+  vctx.setTransform(1, 0, 0, 1, 0, 0); vctx.globalCompositeOperation = "source-over"; vctx.shadowColor = "transparent"; vctx.clearRect(0, 0, visCv.width, visCv.height);
+  vctx.fillStyle = "rgba(6,5,4,.93)"; vctx.fillRect(0, 0, visCv.width, visCv.height);
+  vctx.setTransform(d * cam.z, 0, 0, d * cam.z, d * cam.x, d * cam.y);
+  vctx.globalCompositeOperation = "destination-out"; vctx.fillStyle = "#000";
+  vctx.shadowColor = "#000"; vctx.shadowBlur = 18 * d;
+  for (const t0 of vs) { const t = tokLive[t0.id] ? {...t0, ...tokLive[t0.id]} : t0; vctx.beginPath(); visionPath(vctx, t); vctx.fill(); }
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(visCv, 0, 0); ctx.restore();
+}
 function paintToken(t){
-  const g = G(), r = (t.s || 1) * g.size / 2 * .88;
+  const g = G(), r = tokR(t), ang = t.a || 0;
   ctx.save();
   if (t.h) ctx.globalAlpha = .45;
   ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
   ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
   ctx.fillStyle = t.c || "#d0a54c"; ctx.fill(); ctx.shadowColor = "transparent";
   const im = getImg(t.img);
-  if (im) { ctx.save(); ctx.beginPath(); ctx.arc(t.x, t.y, r * .86, 0, Math.PI * 2); ctx.clip(); const s = Math.max(r * 2 / im.naturalWidth, r * 2 / im.naturalHeight) * .86; ctx.drawImage(im, t.x - im.naturalWidth * s / 2, t.y - im.naturalHeight * s / 2, im.naturalWidth * s, im.naturalHeight * s); ctx.restore(); }
-  else { ctx.fillStyle = "#1a130b"; ctx.font = `700 ${r * .8}px "Alegreya Sans", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText((t.n || "?").trim().slice(0, 2).toUpperCase(), t.x, t.y + r * .04); }
+  if (im) {
+    ctx.save(); ctx.beginPath(); ctx.arc(t.x, t.y, r * .86, 0, Math.PI * 2); ctx.clip();
+    ctx.translate(t.x, t.y); if (t.dir === "rotate") ctx.rotate(ang * Math.PI / 180);
+    const s = Math.max(r * 2 / im.naturalWidth, r * 2 / im.naturalHeight) * .86 * (t.iz || 1);
+    ctx.drawImage(im, -im.naturalWidth * s / 2, -im.naturalHeight * s / 2, im.naturalWidth * s, im.naturalHeight * s); ctx.restore();
+  } else { ctx.fillStyle = "#1a130b"; ctx.font = `700 ${r * .8}px "Alegreya Sans", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText((t.n || "?").trim().slice(0, 2).toUpperCase(), t.x, t.y + r * .04); }
   ctx.lineWidth = Math.max(2, r * .1); ctx.strokeStyle = selTok === t.id ? "#fff" : "rgba(0,0,0,.55)"; ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2); ctx.stroke();
+  if (t.dir === "arrow" || (t.dir !== "rotate" && t.vi?.on && t.vi.t !== "circle")) { // seta de direção
+    const [vx, vy] = dirVec(ang), px = -vy, py = vx, tip = r * 1.32, base = r * 1.02, w = r * .28;
+    ctx.beginPath(); ctx.moveTo(t.x + vx * tip, t.y + vy * tip); ctx.lineTo(t.x + vx * base + px * w, t.y + vy * base + py * w); ctx.lineTo(t.x + vx * base - px * w, t.y + vy * base - py * w); ctx.closePath();
+    ctx.fillStyle = selTok === t.id ? "#fff" : (t.c || "#d0a54c"); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = Math.max(1, r * .05); ctx.stroke();
+  }
+  // barrinhas
+  const bars = (t.b || []).filter(b => b && b.v !== "" && b.v != null);
+  if (bars.length && (isGM || t.bv !== false || owns(t))) {
+    const bw = r * 2, bh = Math.max(3 / cam.z, r * .15), gap = bh * .45;
+    let y = t.y - r - 5 / cam.z - bars.length * (bh + gap);
+    for (const b of bars) {
+      const v = Number(b.v), m = Number(b.m);
+      ctx.fillStyle = "rgba(10,8,6,.85)"; ctx.fillRect(t.x - bw / 2 - 1 / cam.z, y - 1 / cam.z, bw + 2 / cam.z, bh + 2 / cam.z);
+      ctx.fillStyle = b.c || "#c0473a"; ctx.fillRect(t.x - bw / 2, y, m > 0 ? bw * Math.max(0, Math.min(1, v / m)) : bw, bh);
+      if (bh * cam.z >= 9) { ctx.font = `700 ${bh * .95}px "Alegreya Sans", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff"; ctx.shadowColor = "#000"; ctx.shadowBlur = 3; ctx.fillText(m > 0 ? `${b.v}/${b.m}` : String(b.v), t.x, y + bh / 2 + .5 / cam.z); ctx.shadowColor = "transparent"; }
+      y += bh + gap;
+    }
+  }
   if (t.n && g.size * cam.z > 26) {
     const fs = Math.max(11 / cam.z, r * .38); ctx.font = `700 ${fs}px "Alegreya Sans", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "top";
     const w = ctx.measureText(t.n).width + fs * .8;
     ctx.fillStyle = "rgba(23,19,15,.85)"; ctx.fillRect(t.x - w / 2, t.y + r + 2, w, fs * 1.3);
-    ctx.fillStyle = "#eee2c9"; ctx.fillText(t.n, t.x, t.y + r + 2 + fs * .15);
+    ctx.fillStyle = owns(t) && !isGM ? "#ffe28a" : "#eee2c9"; ctx.fillText(t.n, t.x, t.y + r + 2 + fs * .15);
   }
-  if (t.h) { ctx.globalAlpha = 1; ctx.fillStyle = "#e0735e"; ctx.font = `700 ${r * .5}px sans-serif`; ctx.textAlign = "center"; ctx.fillText("oculto", t.x, t.y - r - r * .35); }
+  if (t.h) { ctx.globalAlpha = 1; ctx.fillStyle = "#e0735e"; ctx.font = `700 ${r * .45}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText("oculto", t.x, t.y - r * .15); }
   ctx.restore();
 }
 let fogCv = document.createElement("canvas"), fctx = fogCv.getContext("2d");
@@ -245,7 +316,7 @@ const pts = new Map();
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * .0015), e.clientX, e.clientY); }, {passive: false});
 function hitToken(x, y){
-  for (let i = tokens.length - 1; i >= 0; i--) { const t = tokens[i]; if (!isGM && t.h) continue; const r = (t.s || 1) * G().size / 2 * .88; if (Math.hypot(t.x - x, t.y - y) <= r) return t; }
+  for (let i = tokens.length - 1; i >= 0; i--) { const t = tokens[i]; if (!isGM && t.h) continue; if (Math.hypot(t.x - x, t.y - y) <= tokR(t)) return t; }
   return null;
 }
 cv.addEventListener("pointerdown", e => {
@@ -255,7 +326,7 @@ cv.addEventListener("pointerdown", e => {
   if (e.button === 1 || e.button === 2 || spaceDown) { drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return; }
   if (tool === "move") {
     const t = hitToken(wx, wy);
-    if (t && isGM) { selTok = t.id; drag = {kind: "token", t, dx: t.x - wx, dy: t.y - wy, moved: false}; dirty = true; return; }
+    if (t && (isGM || owns(t))) { selTok = t.id; drag = {kind: "token", t, dx: t.x - wx, dy: t.y - wy, moved: false}; dirty = true; return; }
     selTok = null; dirty = true;
     drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return;
   }
@@ -287,7 +358,11 @@ function endPointer(e){
   const d = drag; drag = null;
   if (d.kind === "pinch") return;
   if (d.kind === "token") {
-    if (d.moved) { const [x, y] = snapPoint(d.t.x, d.t.y, d.t.s || 1); d.t.x = x; d.t.y = y; delete tokLive[d.t.id]; send("tok", {id: d.t.id, x, y}); save("tokens"); }
+    if (d.moved) {
+      const [x, y] = d.t.sn === false ? [Math.round(d.t.x), Math.round(d.t.y)] : snapPoint(d.t.x, d.t.y, d.t.s || 1); d.t.x = x; d.t.y = y; delete tokLive[d.t.id];
+      if (isGM) { send("tok", {id: d.t.id, x, y}); save("tokens"); }
+      else send("tokreq", {id: d.t.id, x, y, who: myNick});
+    }
     dirty = true; return;
   }
   if (d.kind === "ruler") { const rl = rulers[myKey]; setTimeout(() => { if (rulers[myKey] === rl) { delete rulers[myKey]; dirty = true; sendRuler(); } }, 2500); return; }
@@ -298,6 +373,12 @@ function endPointer(e){
 }
 cv.addEventListener("pointerup", endPointer); cv.addEventListener("pointercancel", endPointer);
 cv.addEventListener("dblclick", e => { if (!isGM) return; const [wx, wy] = toWorld(e.clientX, e.clientY); const t = hitToken(wx, wy); if (t) openTokenPanel(t); });
+cv.addEventListener("contextmenu", e => { if (!isGM) return; const [wx, wy] = toWorld(e.clientX, e.clientY); const t = hitToken(wx, wy); if (t) { e.preventDefault(); drag = null; cv.classList.remove("panning"); selTok = t.id; dirty = true; openTokenPanel(t); } });
+function rotateSel(dir){
+  const t = tokens.find(x => x.id === selTok); if (!t || !(isGM || owns(t))) return;
+  const step = G().type === "hex" ? 60 : 45; t.a = (((t.a || 0) + dir * step) % 360 + 360) % 360; dirty = true;
+  if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else send("tokreq", {id: t.id, a: t.a, who: myNick});
+}
 addEventListener("keydown", e => {
   if (e.target.closest?.("input,textarea,select")) return;
   if (e.code === "Space") { spaceDown = true; cv.classList.add("panning"); e.preventDefault(); return; }
@@ -306,6 +387,7 @@ addEventListener("keydown", e => {
   if (k === "+" || k === "=") return zoomAt(1.2);
   if (k === "-") return zoomAt(1 / 1.2);
   if (k === "0") return fit();
+  if ((k === "q" || k === "e") && selTok && (tool === "move" || !isGM)) { const t = tokens.find(x => x.id === selTok); if (t && (isGM || owns(t))) { e.preventDefault(); return rotateSel(k === "q" ? -1 : 1); } }
   const map = {v: "move", r: "ruler", d: "draw", e: "erase", f: "fog"};
   if (map[k] && (isGM || k === "v" || k === "r")) setTool(map[k]);
   if ((k === "delete" || k === "backspace") && selTok && isGM) { const t = tokens.find(x => x.id === selTok); if (t && confirm(`Remover o token “${t.n || "sem nome"}”?`)) { tokens = tokens.filter(x => x !== t); selTok = null; save("tokens"); dirty = true; } }
@@ -390,7 +472,7 @@ function drawTools(){
   };
 }
 function drawTop(){
-  $("#topbar").innerHTML = `<div class="title">Mapa da mesa<small>${isGM ? "mestre" : "jogador"}</small></div><span class="spacer"></span>
+  $("#topbar").innerHTML = `<div class="title">Mapa da mesa<small>${isGM ? "mestre" : esc(myNick || "jogador")}</small></div><span class="spacer"></span>
     ${isGM ? `<button class="btn" id="castBtn" title="Faz a tela dos jogadores ir para onde você está olhando">${I.cast} Levar jogadores aqui</button>` : ""}
     <div class="zoom"><button class="btn small" id="zOut" aria-label="Diminuir zoom">${I.minus}</button><span>${Math.round(cam.z * 100)}%</span><button class="btn small" id="zIn" aria-label="Aumentar zoom">${I.plus}</button><button class="btn small" id="zFit" title="Enquadrar o mapa (0)" aria-label="Enquadrar">${I.fit}</button></div>`;
   $("#zOut").onclick = () => zoomAt(1 / 1.2); $("#zIn").onclick = () => zoomAt(1.2); $("#zFit").onclick = fit;
@@ -501,37 +583,128 @@ function openScenePanel(refresh){
 function openTokenPanel(t){
   panelKind = "token";
   const isNew = !t;
-  const d = t || {n: "", c: COLORS[1], s: 1, img: "", h: false};
-  let color = d.c;
-  $("#panel").innerHTML = `<div class="panel" role="dialog" aria-label="Token"><h3>${isNew ? "Novo token" : "Editar token"} <button class="btn small" id="pClose">Fechar</button></h3>
-    <label for="tName">Nome</label><input type="text" id="tName" maxlength="24" value="${esc(d.n)}" placeholder="Ex.: Goblin 1, Aria, Dragão">
-    <label>Cor</label><div class="row" id="tColors">${COLORS.map(c => `<button type="button" class="sw" data-color="${c}" style="background:${c}" aria-label="Cor ${c}" aria-pressed="${color === c}"></button>`).join("")}</div>
-    <label>Tamanho</label><div class="seg" id="tSize">${[[1, "Médio (1)"], [2, "Grande (2)"], [3, "Enorme (3)"], [4, "Colossal (4)"]].map(([v, l]) => `<button data-sz="${v}" aria-pressed="${(d.s || 1) === v}">${l}</button>`).join("")}</div>
-    <label for="tImg">Imagem (opcional)</label>
-    <div style="display:flex;gap:6px"><input type="url" id="tImg" placeholder="link de uma imagem" value="${esc(d.img || "")}"><label class="btn small" style="margin:0;color:var(--ink)">Arquivo<input type="file" id="tFile" accept="image/*" hidden></label></div>
-    <label class="chk" style="margin-top:12px"><input type="checkbox" id="tHide" ${d.h ? "checked" : ""}> Oculto dos jogadores</label>
-    <div class="acts"><button class="btn primary" id="tSave">${isNew ? "Colocar no mapa" : "Salvar"}</button>${isNew ? "" : `<button class="btn" id="tDup">Duplicar</button><button class="btn danger" id="tDel">Remover</button>`}</div>
-    ${isNew ? `<p class="hint" style="margin-top:10px">O token aparece no centro da tela. Arraste com a ferramenta Mover; dois cliques nele para editar.</p>` : ""}</div>`;
-  let size = d.s || 1;
-  $("#pClose").onclick = closePanel;
-  $("#tColors").onclick = e => { const b = e.target.closest("[data-color]"); if (!b) return; color = b.dataset.color; $("#tColors").querySelectorAll("[data-color]").forEach(x => x.setAttribute("aria-pressed", x === b)); };
-  $("#tSize").onclick = e => { const b = e.target.closest("[data-sz]"); if (!b) return; size = +b.dataset.sz; $("#tSize").querySelectorAll("[data-sz]").forEach(x => x.setAttribute("aria-pressed", x === b)); };
-  $("#tFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; toast("Enviando imagem…"); try { $("#tImg").value = await uploadImage(f, "tokens"); toast("Imagem pronta."); } catch (err) { toast("Não enviei: " + err.message); } };
+  const d = JSON.parse(JSON.stringify(t || {n: "", c: COLORS[1], s: 1, img: "", h: false}));
+  d.b = [0, 1, 2].map(i => (d.b || [])[i] || {v: "", m: "", c: ["#c0473a", "#7fb2e8", "#3fbf4a"][i]});
+  d.au = {on: false, f: "circle", d: 3, c: "#ff3b30", ...(d.au || {})};
+  d.vi = {on: false, t: "cone", r: 9, ang: 90, ...(d.vi || {})};
+  if (d.sn == null) d.sn = true;
+  let tab = "props";
+  const names = [...new Set([...peersOnMap, ...tokens.map(x => x.o).filter(x => x && x !== "*")])].sort((x, y) => x.localeCompare(y, "pt-BR"));
+  const known = !d.o || d.o === "*" || names.includes(d.o);
+  const tabs = [["props", "Propriedades"], ["aura", "Aura"], ["vis", "Visão"], ["img", "Imagem"]];
+  const DIRS = [["none", "Sem direção"], ["arrow", "Seta de direção"], ["rotate", "Rotacionar imagem"]];
+  const ARROWS = [[315, "↖"], [0, "↑"], [45, "↗"], [270, "←"], [null, "•"], [90, "→"], [225, "↙"], [180, "↓"], [135, "↘"]];
+  $("#panel").innerHTML = `<div class="panel tokpanel" role="dialog" aria-label="Propriedades do token"><h3>${isNew ? "Novo token" : "Propriedades do token"}</h3>
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>
+
+    <section data-pane="props">
+      <label for="tOwner">Personagem de</label>
+      <select id="tOwner">
+        <option value="">Ninguém (só o mestre move)</option>
+        <option value="*" ${d.o === "*" ? "selected" : ""}>Todos os jogadores</option>
+        ${names.map(n => `<option value="${esc(n)}" ${d.o === n ? "selected" : ""}>${esc(n)}${peersOnMap.includes(n) ? " · no mapa agora" : ""}</option>`).join("")}
+        <option value="__other" ${known ? "" : "selected"}>Outro nome…</option>
+      </select>
+      <input type="text" id="tOwnerTxt" maxlength="30" placeholder="Nome do jogador, igual ao que ele usa na mesa" value="${known ? "" : esc(d.o)}" ${known ? "hidden" : ""} style="margin-top:6px">
+      <label for="tName">Nome</label><input type="text" id="tName" maxlength="24" value="${esc(d.n)}" placeholder="Ex.: Carroça, Goblin 1, Aria">
+      <label>Cor</label><div class="row" id="tColors">${COLORS.map(c => `<button type="button" class="sw" data-color="${c}" style="background:${c}" aria-label="Cor ${c}" aria-pressed="${d.c === c}"></button>`).join("")}</div>
+      <label>Tamanho</label><div class="seg" id="tSize">${[[1, "1 casa"], [2, "2"], [3, "3"], [4, "4"]].map(([v, l]) => `<button data-sz="${v}" aria-pressed="${(d.s || 1) === v}">${l}</button>`).join("")}</div>
+      <label class="chk" style="margin-top:12px"><input type="checkbox" id="tSnap" ${d.sn ? "checked" : ""}> Agarrar ao grid</label>
+      <label for="tDir">Direção</label>
+      <select id="tDir">${DIRS.map(([k, l]) => `<option value="${k}" ${(d.dir || "none") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <div class="dirpad" id="tAng" aria-label="Para onde o token olha">${ARROWS.map(([a, l]) => a == null ? `<span>${l}</span>` : `<button type="button" data-ang="${a}" aria-pressed="${(d.a || 0) === a}" aria-label="Olhar para ${a} graus">${l}</button>`).join("")}</div>
+      <p class="hint">No mapa: selecione o token e use Q / E para girar.</p>
+      <label>Barrinhas (atual / máximo)</label>
+      ${d.b.map((b, i) => `<div class="barrow"><span>${i + 1}</span><input type="text" inputmode="numeric" data-bv="${i}" value="${esc(b.v)}" aria-label="Barrinha ${i + 1} valor"><em>/</em><input type="text" inputmode="numeric" data-bm="${i}" value="${esc(b.m)}" aria-label="Barrinha ${i + 1} máximo"><input type="color" data-bc="${i}" value="${b.c}" aria-label="Cor da barrinha ${i + 1}"></div>`).join("")}
+      <label class="chk"><input type="checkbox" id="tBv" ${d.bv !== false ? "checked" : ""}> Jogadores veem as barrinhas</label>
+      <label class="chk" style="margin-top:6px"><input type="checkbox" id="tHide" ${d.h ? "checked" : ""}> Token oculto dos jogadores</label>
+    </section>
+
+    <section data-pane="aura" hidden>
+      <label class="chk big"><input type="checkbox" id="aOn" ${d.au.on ? "checked" : ""}> Possui aura</label>
+      <label for="aF">Formato</label>
+      <select id="aF"><option value="circle" ${d.au.f === "circle" ? "selected" : ""}>Círculo perfeito</option><option value="square" ${d.au.f === "square" ? "selected" : ""}>Quadrado</option><option value="cells" ${d.au.f === "cells" ? "selected" : ""}>Casas da grid</option></select>
+      <label for="aD">Diâmetro</label><div class="unitin"><input type="number" id="aD" min="0" step="0.5" value="${d.au.d}"><span>${esc(G().unitName)}</span></div>
+      <label for="aC">Cor da aura</label><input type="color" id="aC" value="${d.au.c}" class="wide">
+      <p class="hint">Ex.: luz de tocha, área de medo, alcance de magia.</p>
+    </section>
+
+    <section data-pane="vis" hidden>
+      <label class="chk big"><input type="checkbox" id="vOn" ${d.vi.on ? "checked" : ""}> Possui visão</label>
+      <label for="vT">Tipo</label>
+      <select id="vT"><option value="cone" ${d.vi.t === "cone" ? "selected" : ""}>Cone (olha para a direção do token)</option><option value="circle" ${d.vi.t === "circle" ? "selected" : ""}>Em volta (360°)</option></select>
+      <label for="vR">Alcance</label><div class="unitin"><input type="number" id="vR" min="1" step="0.5" value="${d.vi.r}"><span>${esc(G().unitName)}</span></div>
+      <label for="vA">Abertura do cone: <b id="vAv">${d.vi.ang}°</b></label><input type="range" id="vA" min="30" max="180" step="5" value="${d.vi.ang}">
+      <p class="hint">Quando um token de jogador tem visão, o jogador só enxerga o que está dentro dela — o resto fica escuro. Cada jogador vê pela visão do próprio personagem; quem não tem personagem vê pela visão do grupo. Você (mestre) vê o cone tracejado.</p>
+    </section>
+
+    <section data-pane="img" hidden>
+      <label for="tImg">Imagem (link)</label>
+      <div style="display:flex;gap:6px"><input type="url" id="tImg" placeholder="https://… .png" value="${esc(d.img || "")}"><label class="btn small" style="margin:0;color:var(--ink)">Arquivo<input type="file" id="tFile" accept="image/*" hidden></label></div>
+      <label for="tIz">Zoom da imagem: <b id="tIzv">${Math.round((d.iz || 1) * 100)}%</b></label><input type="range" id="tIz" min="0.6" max="2.5" step="0.05" value="${d.iz || 1}">
+      <div class="tokprev"><canvas id="tPrev" width="120" height="120"></canvas></div>
+      ${d.img ? `<button class="btn small danger" id="tImgDel">Tirar imagem</button>` : ""}
+    </section>
+
+    <div class="acts foot">${isNew ? "" : `<button class="btn small" id="tDup">Duplicar</button><button class="btn small danger" id="tDel">Remover</button>`}<span class="spacer"></span><button class="btn" id="tCancel">Cancelar</button><button class="btn primary" id="tSave">${isNew ? "Colocar" : "Ok"}</button></div>
+  </div>`;
+  const P = $("#panel");
+  const showTab = k => { tab = k; P.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === k)); P.querySelectorAll("[data-pane]").forEach(x => x.hidden = x.dataset.pane !== k); if (k === "img") prev(); };
+  P.querySelector(".tabs").onclick = e => { const b = e.target.closest("[data-tab]"); if (b) showTab(b.dataset.tab); };
+  const press = (box, sel, el) => box.querySelectorAll(sel).forEach(x => x.setAttribute("aria-pressed", x === el));
+  $("#tOwner").onchange = e => { $("#tOwnerTxt").hidden = e.target.value !== "__other"; if (e.target.value === "__other") $("#tOwnerTxt").focus(); };
+  $("#tColors").onclick = e => { const b = e.target.closest("[data-color]"); if (b) { d.c = b.dataset.color; press($("#tColors"), "[data-color]", b); prev(); } };
+  $("#tSize").onclick = e => { const b = e.target.closest("[data-sz]"); if (b) { d.s = +b.dataset.sz; press($("#tSize"), "[data-sz]", b); } };
+  $("#tAng").onclick = e => { const b = e.target.closest("[data-ang]"); if (b) { d.a = +b.dataset.ang; press($("#tAng"), "[data-ang]", b); if ($("#tDir").value === "none" && !$("#vOn").checked) $("#tDir").value = "arrow"; prev(); } };
+  $("#vA").oninput = e => $("#vAv").textContent = e.target.value + "°";
+  $("#tIz").oninput = e => { d.iz = +e.target.value; $("#tIzv").textContent = Math.round(d.iz * 100) + "%"; prev(); };
+  $("#tImg").onchange = () => prev();
+  $("#tFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; toast("Enviando imagem…"); try { $("#tImg").value = await uploadImage(f, "tokens"); toast("Imagem pronta."); prev(); } catch (err) { toast("Não enviei: " + err.message); } };
+  const del = $("#tImgDel"); if (del) del.onclick = () => { $("#tImg").value = ""; prev(); };
+  function prev(){
+    const c = $("#tPrev"); if (!c || P.querySelector('[data-pane="img"]').hidden) return;
+    const x = c.getContext("2d"), url = $("#tImg").value.trim(), im = getImg(url);
+    x.clearRect(0, 0, 120, 120); x.beginPath(); x.arc(60, 60, 54, 0, Math.PI * 2); x.fillStyle = d.c; x.fill();
+    if (im) { x.save(); x.beginPath(); x.arc(60, 60, 47, 0, Math.PI * 2); x.clip(); x.translate(60, 60); if ($("#tDir").value === "rotate") x.rotate((d.a || 0) * Math.PI / 180); const s = Math.max(108 / im.naturalWidth, 108 / im.naturalHeight) * .86 * (d.iz || 1); x.drawImage(im, -im.naturalWidth * s / 2, -im.naturalHeight * s / 2, im.naturalWidth * s, im.naturalHeight * s); x.restore(); }
+    else if (url) setTimeout(prev, 300);
+    x.lineWidth = 5; x.strokeStyle = "rgba(0,0,0,.5)"; x.beginPath(); x.arc(60, 60, 54, 0, Math.PI * 2); x.stroke();
+  }
   $("#tName").focus();
   $("#tName").onkeydown = e => { if (e.key === "Enter") $("#tSave").click(); };
+  $("#tCancel").onclick = closePanel;
+  const num = v => { const n = String(v).trim().replace(",", "."); return n === "" ? "" : (isNaN(+n) ? n.slice(0, 6) : +n); };
   $("#tSave").onclick = () => {
-    const vals = {n: $("#tName").value.trim(), c: color, s: size, img: $("#tImg").value.trim() || null, h: $("#tHide").checked};
+    const ow = $("#tOwner").value === "__other" ? $("#tOwnerTxt").value.trim() : $("#tOwner").value;
+    const vals = {
+      n: $("#tName").value.trim(), c: d.c, s: d.s || 1, o: ow || null, sn: $("#tSnap").checked, dir: $("#tDir").value, a: d.a || 0,
+      b: d.b.map((b, i) => ({v: num(P.querySelector(`[data-bv="${i}"]`).value), m: num(P.querySelector(`[data-bm="${i}"]`).value), c: P.querySelector(`[data-bc="${i}"]`).value})),
+      bv: $("#tBv").checked, h: $("#tHide").checked,
+      au: {on: $("#aOn").checked, f: $("#aF").value, d: Math.max(0, parseFloat(String($("#aD").value).replace(",", ".")) || 0), c: $("#aC").value},
+      vi: {on: $("#vOn").checked, t: $("#vT").value, r: Math.max(1, parseFloat(String($("#vR").value).replace(",", ".")) || 9), ang: +$("#vA").value},
+      img: $("#tImg").value.trim() || null, iz: d.iz || 1,
+    };
     if (isNew) {
       const [wx, wy] = toWorld(innerWidth / 2, innerHeight / 2);
-      const off = tokens.length % 5 * G().size; const [x, y] = snapPoint(wx + off, wy, size);
+      const off = tokens.length % 5 * G().size; const [x, y] = vals.sn ? snapPoint(wx + off, wy, vals.s) : [Math.round(wx + off), Math.round(wy)];
       const nt = {id: uid(), ...vals, x, y}; tokens.push(nt); selTok = nt.id;
-    } else { Object.assign(t, vals); const [x, y] = snapPoint(t.x, t.y, size); t.x = x; t.y = y; }
+    } else { Object.assign(t, vals); if (vals.sn) { const [x, y] = snapPoint(t.x, t.y, vals.s); t.x = x; t.y = y; } }
     save("tokens"); dirty = true; drawEmpty(); closePanel();
   };
   if (!isNew) {
     $("#tDel").onclick = () => { tokens = tokens.filter(x => x !== t); selTok = null; save("tokens"); dirty = true; closePanel(); };
-    $("#tDup").onclick = () => { const c = {...t, id: uid(), n: t.n.replace(/(\d+)$/, m => String(+m + 1)) || t.n}; const [x, y] = snapPoint(t.x + G().size * (t.s || 1), t.y, t.s || 1); c.x = x; c.y = y; if (c.n === t.n) c.n = t.n + " 2"; tokens.push(c); selTok = c.id; save("tokens"); dirty = true; closePanel(); };
+    $("#tDup").onclick = () => { const c = JSON.parse(JSON.stringify(t)); c.id = uid(); c.n = t.n.replace(/(\d+)$/, m => String(+m + 1)); if (c.n === t.n) c.n = (t.n || "Token") + " 2"; const [x, y] = snapPoint(t.x + G().size * (t.s || 1), t.y, t.s || 1); c.x = x; c.y = y; tokens.push(c); selTok = c.id; save("tokens"); dirty = true; closePanel(); };
   }
+}
+
+function askNick(){
+  return new Promise(ok => {
+    $("#gate").innerHTML = `<form id="nickForm" style="display:flex;flex-direction:column;gap:10px;align-items:center"><b style="font:700 26px/1 var(--display);color:var(--brass)">Qual é o seu nome na mesa?</b>
+      <span>O mestre usa esse nome para te dar o controle do seu personagem.</span>
+      <input id="nickIn" maxlength="30" required style="background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:240px;text-align:center" placeholder="Seu nome">
+      <button class="btn primary">Entrar no mapa</button></form>`;
+    $("#nickIn").focus();
+    $("#nickForm").onsubmit = e => { e.preventDefault(); myNick = $("#nickIn").value.trim().slice(0, 30); try { localStorage.setItem("mesa.nick", myNick); } catch {} ok(); };
+  });
 }
 
 // ---------- início ----------
@@ -545,15 +718,33 @@ async function boot(){
   sb.auth.onAuthStateChange((_e, s) => { if (!!s !== isGM) location.reload(); });
   drawTools(); drawTop(); setTool("move");
   if (!(await load())) return;
+  if (!isGM && !myNick) await askNick();
   $("#gate").hidden = true;
   fit();
   let reloadT = null;
   sb.channel("mapa-db").on("postgres_changes", {event: "*", schema: "public", table: "map_state"}, () => { clearTimeout(reloadT); reloadT = setTimeout(load, 80); }).subscribe();
-  chan = sb.channel("mapa", {config: {broadcast: {self: false}}});
-  chan.on("broadcast", {event: "tok"}, ({payload: p}) => { if (!p?.id) return; if (p.live) tokLive[p.id] = {x: p.x, y: p.y}; else { delete tokLive[p.id]; const t = tokens.find(x => x.id === p.id); if (t) { t.x = p.x; t.y = p.y; } } dirty = true; });
+  chan = sb.channel("mapa", {config: {broadcast: {self: false}, presence: {key: myKey}}});
+  chan.on("broadcast", {event: "tok"}, ({payload: p}) => {
+    if (!p?.id) return;
+    if (p.live) tokLive[p.id] = {x: p.x, y: p.y};
+    else { delete tokLive[p.id]; const t = tokens.find(x => x.id === p.id); if (t) { t.x = p.x; t.y = p.y; if (p.a != null) t.a = p.a; } }
+    dirty = true;
+  });
+  chan.on("broadcast", {event: "tokreq"}, ({payload: p}) => { // jogador moveu/girou o próprio token: o mestre confere e salva
+    if (!isGM || !p?.id) return;
+    const t = tokens.find(x => x.id === p.id); if (!t || !t.o) return;
+    if (t.o !== "*" && String(p.who || "").toLowerCase() !== t.o.toLowerCase()) return;
+    if (p.x != null) { const [x, y] = t.sn === false ? [Math.round(p.x), Math.round(p.y)] : snapPoint(p.x, p.y, t.s || 1); t.x = x; t.y = y; }
+    if (p.a != null) t.a = ((+p.a % 360) + 360) % 360;
+    delete tokLive[t.id]; send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); dirty = true;
+  });
+  chan.on("presence", {event: "sync"}, () => {
+    const st = chan.presenceState();
+    peersOnMap = [...new Set(Object.values(st).map(a => a[a.length - 1]).filter(x => x?.role === "player" && x.name).map(x => x.name))];
+  });
   chan.on("broadcast", {event: "ruler"}, ({payload: p}) => { if (!p?.k) return; if (p.r) rulers[p.k] = p.r; else delete rulers[p.k]; dirty = true; });
   chan.on("broadcast", {event: "view"}, ({payload: p}) => { if (!isGM && p) { centerOn(p.x, p.y, p.z); toast("O mestre levou você para esta parte do mapa."); } });
-  chan.subscribe(st => { $("#status").textContent = st === "SUBSCRIBED" ? (isGM ? "ao vivo · jogadores veem o que você fizer" : "ao vivo") : "reconectando…"; });
+  chan.subscribe(st => { if (st === "SUBSCRIBED") chan.track({name: isGM ? "Mestre" : myNick, role: isGM ? "gm" : "player"}); $("#status").textContent = st === "SUBSCRIBED" ? (isGM ? "ao vivo · jogadores veem o que você fizer" : "ao vivo") : "reconectando…"; });
   requestAnimationFrame(frame);
 }
 boot();
