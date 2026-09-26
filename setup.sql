@@ -84,3 +84,10 @@ select * from (values
   ('Sino do templo', 'sfx', 'file', '/sons/sino.webm', 0.9, 3.5, now() + interval '29 seconds')
 ) as v(name, kind, source, url, volume, duration, created_at)
 where not exists (select 1 from public.sounds);
+
+-- v2: pastas, favoritos, lado (pan) e trechos do YouTube
+alter table public.sounds add column if not exists folder text;
+alter table public.sounds add column if not exists favorite boolean not null default false;
+alter table public.sounds add column if not exists pan real not null default 0;
+alter table public.sounds add column if not exists yt_start real;
+alter table public.sounds add column if not exists yt_end real;

@@ -9,6 +9,9 @@ const ICON = {
   ear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><rect x="3" y="14" width="4" height="7" rx="1.5"/><rect x="17" y="14" width="4" height="7" rx="1.5"/></svg>',
   up:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>',
   hush:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>',
+  star:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>',
+  starOn:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>',
+  folder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>',
   vol:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
 };
 const KEYS = "1234567890QWERTYUIOPASDFGHJKLZXCVBNM".split("");
@@ -22,8 +25,11 @@ let peers = [];
 let joined = false;
 let filter = "";
 let lastSfx = null;
+let side = null;          // null = lado padrão de cada som, -1 esquerdo, 1 direito
+let curFolder = "";       // "" todas, "__fav" favoritos, ou nome da pasta
+let visibleSfx = [];
 let myVol = 0.85, nick = "";
-try { const v = parseFloat(localStorage.getItem("mesa.vol")); if (!isNaN(v)) myVol = v; nick = localStorage.getItem("mesa.nick") || ""; } catch {}
+try { const v = parseFloat(localStorage.getItem("mesa.vol")); if (!isNaN(v)) myVol = v; nick = localStorage.getItem("mesa.nick") || ""; curFolder = localStorage.getItem("mesa.folder") || ""; } catch {}
 
 const byId = id => sounds.find(s => s.id === id);
 const fmtDur = d => !d ? "" : d >= 60 ? Math.floor(d/60) + ":" + String(Math.round(d%60)).padStart(2,"0") : Math.round(d) + "s";
@@ -31,6 +37,16 @@ function toast(msg, ms = 3500){
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
   clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, ms);
 }
+function ytStart(u){
+  try {
+    const url = new URL(u.trim()); const t = url.searchParams.get("t") || url.searchParams.get("start"); if (!t) return 0;
+    if (/^\d+$/.test(t)) return +t;
+    const m = t.match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/); return m ? (+(m[1]||0))*3600 + (+(m[2]||0))*60 + (+(m[3]||0)) : 0;
+  } catch { return 0; }
+}
+const parseTime = v => { v = String(v || "").trim(); if (!v) return null; if (v.includes(":")) { const [a, b] = v.split(":"); return (+a)*60 + (+b || 0); } const n = parseFloat(v.replace(",", ".")); return isNaN(n) ? null : n; };
+const fmtTime = n => n == null || n === "" ? "" : Math.floor(n/60) + ":" + String(Math.round(n % 60)).padStart(2, "0");
+const folders = () => [...new Set(sounds.map(s => (s.folder || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 function ytId(u){
   try {
     const url = new URL(u.trim());
@@ -68,14 +84,16 @@ const A = {
     if (this.master) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, .05);
     for (const vc of this.all()) if (vc.type === "yt") vc.apply();
   },
-  all(){ return [this.music, ...this.amb.values(), this.preview].filter(Boolean); },
+  all(){ return [this.music, ...this.amb.values(), this.preview, ...this.ytPool.values()].filter(Boolean); },
+  panNode(pan){ const p = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null; if (p) p.pan.value = Math.max(-1, Math.min(1, Number(pan) || 0)); return p; },
 
   fileVoice(s, vol, startedAt, dest){
     const el = new Audio(); el.crossOrigin = "anonymous"; el.src = s.url; el.loop = true; el.preload = "auto";
     const src = this.ctx.createMediaElementSource(el);
     const g = this.ctx.createGain(); g.gain.value = 0;
-    src.connect(g).connect(dest || this.master);
-    const v = {type:"file", sid:s.id, el, g, target:vol,
+    const pn = this.panNode(s.pan);
+    if (pn) src.connect(g).connect(pn).connect(dest || this.master); else src.connect(g).connect(dest || this.master);
+    const v = {type:"file", pn, sid:s.id, el, g, target:vol,
       fade:(to, secs) => { const t = this.ctx.currentTime; v.target = to; g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(to, t + secs); },
       stop:(secs = 1.5) => { v.fade(0, secs); setTimeout(() => { try { el.pause(); el.removeAttribute("src"); el.load(); } catch {} }, secs*1000 + 100); }
     };
@@ -89,36 +107,60 @@ const A = {
     return v;
   },
 
+  // mode: "loop" (trilha/ambiente), "once" (pré-ouvir), "pool" (efeito pronto para disparar)
   ytVoice(s, vol, startedAt, opts = {}){
+    const mode = opts.mode || "loop";
+    const start = Number(s.yt_start) || 0, end = Number(s.yt_end) || 0;
     const box = document.createElement("div"); box.className = "yt-item";
     const holder = document.createElement("div"); box.appendChild(holder);
-    const cap = document.createElement("span"); cap.textContent = s.name; box.appendChild(cap);
+    const cap = document.createElement("span"); cap.textContent = (mode === "pool" ? "Efeito: " : "") + s.name; box.appendChild(cap);
     $("#ytDock").appendChild(box); refreshDock();
-    const v = {type:"yt", sid:s.id, target:vol, cur:0, player:null, box, dead:false, noMaster:!!opts.noMaster,
-      apply(){ if (v.player?.setVolume) v.player.setVolume(Math.round(v.cur * (v.noMaster ? 1 : myVol) * 100)); },
+    const v = {type:"yt", mode, sid:s.id, target:vol, cur:0, player:null, ready:false, box, dead:false, noMaster:!!opts.noMaster,
+      apply(){ if (v.player?.setVolume) v.player.setVolume(Math.round(Math.max(0, Math.min(1, v.cur * (v.noMaster ? 1 : myVol))) * 100)); },
       fade(to, secs){
         v.target = to; clearInterval(v.iv);
         const from = v.cur, steps = Math.max(1, Math.round(secs*1000/60)); let i = 0;
         v.iv = setInterval(() => { i++; v.cur = from + (to - from) * (i/steps); v.apply(); if (i >= steps) clearInterval(v.iv); }, 60);
       },
-      stop(secs = 1.5){ v.fade(0, secs); setTimeout(() => { v.dead = true; try { v.player?.destroy(); } catch {} box.remove(); refreshDock(); }, secs*1000 + 150); }
+      stop(secs = 1.5){ v.fade(0, secs); setTimeout(() => v.destroy(), secs*1000 + 150); },
+      destroy(){ v.dead = true; clearInterval(v.iv); clearInterval(v.watch); try { v.player?.destroy(); } catch {} box.remove(); refreshDock(); },
+      fire(volume){ // efeito: toca do início do trecho
+        if (!v.ready) return false;
+        v.cur = volume; v.target = volume; v.apply();
+        v.player.seekTo(start, true); v.player.playVideo(); return true;
+      },
+      pause(){ try { v.player?.pauseVideo(); } catch {} }
     };
+    // vigia o fim do trecho escolhido
+    v.watch = setInterval(() => {
+      if (!v.ready || !end || v.dead) return;
+      const t = v.player.getCurrentTime?.() || 0;
+      if (t >= end) { if (mode === "loop") v.player.seekTo(start, true); else if (mode === "once") { A.preview === v && (A.preview = null); v.destroy(); render(); } else v.pause(); }
+    }, 150);
     loadYT().then(() => {
       if (v.dead) return;
       v.player = new YT.Player(holder, {
         videoId: s.yt_id, width: 240, height: 135,
-        playerVars: {autoplay:1, controls:0, disablekb:1, playsinline:1, rel:0, loop: opts.once ? 0 : 1, playlist: opts.once ? undefined : s.yt_id},
+        playerVars: {autoplay: mode === "pool" ? 0 : 1, controls:0, disablekb:1, playsinline:1, rel:0, start: Math.floor(start)},
         events: {
           onReady: e => {
             if (v.dead) return;
-            v.cur = 0; v.apply();
+            v.ready = true; v.cur = 0; v.apply();
+            if (mode === "pool") { e.target.seekTo(start, true); e.target.pauseVideo(); return; }
             const d = e.target.getDuration();
-            if (startedAt && d > 0) { const pos = ((Date.now() - startedAt)/1000) % d; if (pos > 1) e.target.seekTo(pos, true); }
+            const segEnd = end || d, seg = segEnd - start;
+            let pos = start;
+            if (mode === "loop" && startedAt && seg > 0) pos = start + ((Date.now() - startedAt)/1000) % seg;
+            e.target.seekTo(pos, true);
             e.target.playVideo();
-            v.fade(vol, 1.5);
-            if (isGM && d > 0 && !s.duration) sb.from("sounds").update({duration: Math.round(d)}).eq("id", s.id).then(() => {});
+            v.fade(vol, mode === "once" ? .2 : 1.5);
+            if (isGM && d > 0 && !s.duration) sb.from("sounds").update({duration: Math.round(seg)}).eq("id", s.id).then(() => {});
           },
-          onStateChange: e => { if (e.data === 0 && !opts.once && !v.dead) { e.target.seekTo(0, true); e.target.playVideo(); } },
+          onStateChange: e => {
+            if (e.data !== 0 || v.dead) return;
+            if (mode === "loop") { e.target.seekTo(start, true); e.target.playVideo(); }
+            else if (mode === "once") { if (A.preview === v) A.preview = null; v.destroy(); render(); }
+          },
           onError: e => {
             const msg = (e.data === 101 || e.data === 150) ? "O dono do vídeo “" + s.name + "” não deixa tocar fora do YouTube. Tente outro link." : "O YouTube não conseguiu tocar “" + s.name + "”.";
             toast(msg, 6000);
@@ -128,6 +170,27 @@ const A = {
     });
     return v;
   },
+  ytPool: new Map(),
+  syncYtPool(){
+    if (!this.ctx) return;
+    const key = s => s.yt_id + ":" + (s.yt_start || 0) + ":" + (s.yt_end || 0);
+    const want = new Map(sounds.filter(s => s.kind === "sfx" && s.source === "youtube").map(s => [s.id, s]));
+    for (const [sid, v] of this.ytPool) {
+      const s = want.get(sid);
+      if (!s || key(s) !== v.ytKey) { v.destroy(); this.ytPool.delete(sid); }
+    }
+    for (const [sid, s] of want) if (!this.ytPool.has(sid)) {
+      const v = this.ytVoice(s, 0, null, {mode:"pool"}); v.ytKey = key(s);
+      this.ytPool.set(sid, v);
+    }
+  },
+  fireYt(s, vol){
+    const v = this.ytPool.get(s.id);
+    if (v && v.fire(vol)) return;
+    // ainda carregando: toca num player avulso
+    this.ytVoice(s, vol, null, {mode:"once"});
+  },
+  stopYtSfx(){ for (const v of this.ytPool.values()) v.pause(); },
 
   voice(s, vol, at){ return s.source === "youtube" ? this.ytVoice(s, vol, at) : this.fileVoice(s, vol, at); },
 
@@ -139,6 +202,7 @@ const A = {
         if (this.music) this.music.stop(2);
         this.music = this.voice(byId(m.sid), m.vol ?? .8, m.at); this.music.at = m.at;
       } else if (Math.abs(this.music.target - (m.vol ?? .8)) > .001) this.music.fade(m.vol ?? .8, .3);
+      if (this.music?.pn) this.music.pn.pan.value = Number(byId(m.sid).pan) || 0;
     } else if (this.music) { this.music.stop(2); this.music = null; }
 
     const want = live.amb || {};
@@ -148,6 +212,7 @@ const A = {
       const w = want[sid], cur = this.amb.get(sid);
       if (!cur) this.amb.set(sid, this.voice(s, w.vol ?? .7, w.at));
       else if (Math.abs(cur.target - (w.vol ?? .7)) > .001) cur.fade(w.vol ?? .7, .3);
+      if (cur?.pn) cur.pn.pan.value = Number(s.pan) || 0;
     }
   },
   async buffer(s){
@@ -156,22 +221,25 @@ const A = {
     this.buffers.set(s.id, p); p.catch(() => this.buffers.delete(s.id));
     return p;
   },
-  async sfx(s, vol){
-    if (!this.ctx || s.source === "youtube") return;
+  async sfx(s, vol, pan){
+    if (!this.ctx) return;
+    if (s.source === "youtube") return this.fireYt(s, vol ?? s.volume ?? 1);
     try {
       const buf = await this.buffer(s);
       const src = this.ctx.createBufferSource(); src.buffer = buf;
       const g = this.ctx.createGain(); g.gain.value = vol ?? s.volume ?? 1;
-      src.connect(g).connect(this.master); src.start();
+      const pn = this.panNode(pan ?? s.pan);
+      if (pn) src.connect(g).connect(pn).connect(this.master); else src.connect(g).connect(this.master);
+      src.start();
       this.sfxLive.add(src); src.onended = () => this.sfxLive.delete(src);
     } catch { toast("Não consegui tocar “" + s.name + "”."); }
   },
-  stopSfx(){ for (const s of this.sfxLive) { try { s.stop(); } catch {} } },
-  preloadSfx(){ for (const s of sounds) if (s.kind === "sfx" && s.source !== "youtube") this.buffer(s).catch(() => {}); },
+  stopSfx(){ for (const s of this.sfxLive) { try { s.stop(); } catch {} } this.stopYtSfx(); },
+  preloadSfx(){ for (const s of sounds) if (s.kind === "sfx" && s.source !== "youtube") this.buffer(s).catch(() => {}); this.syncYtPool(); },
   previewToggle(s){
     this.init();
     if (this.preview) { const p = this.preview; this.preview = null; p.stop(.3); if (p.sid === s.id) return render(); }
-    if (s.source === "youtube") this.preview = this.ytVoice(s, .9, null, {noMaster:true, once:true});
+    if (s.source === "youtube") this.preview = this.ytVoice(s, .9, null, {noMaster:true, mode:"once"});
     else {
       const v = this.fileVoice(s, .9, null, this.ctx.destination); v.el.loop = false;
       v.el.addEventListener("ended", () => { if (this.preview === v) { this.preview = null; render(); } });
@@ -204,8 +272,10 @@ function setLiveVol(kind, sid, v){
   clearTimeout(volTimer); volTimer = setTimeout(() => saveLive(live), 350);
 }
 function fireSfx(s){
-  A.init(); flashPad(s.id); A.sfx(s);
-  chan?.send({type:"broadcast", event:"sfx", payload:{sid:s.id, vol:s.volume ?? 1}});
+  A.init(); flashPad(s.id);
+  const pan = side === null ? (Number(s.pan) || 0) : side;
+  A.sfx(s, s.volume ?? 1, pan);
+  chan?.send({type:"broadcast", event:"sfx", payload:{sid:s.id, vol:s.volume ?? 1, pan}});
 }
 function stopAll(){
   A.init(); A.stopSfx();
@@ -228,6 +298,7 @@ function probeDuration(file){
 }
 const defVol = k => k === "sfx" ? 1 : k === "music" ? .75 : .7;
 let upKind = "sfx", upTab = "file";
+const upFolder = () => ($("#upFolder")?.value || "").trim().slice(0, 40);
 async function handleFiles(files){
   const q = $("#queue");
   for (const f of files) {
@@ -244,7 +315,7 @@ async function handleFiles(files){
       if (upErr) throw upErr;
       const url = sb.storage.from("sons").getPublicUrl(path).data.publicUrl;
       const name = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 60) || "Som";
-      const {error} = await sb.from("sounds").insert({name, kind, source:"file", url, storage_path:path, volume:defVol(kind), duration:Math.round(duration*10)/10});
+      const {error} = await sb.from("sounds").insert({name, kind, source:"file", url, storage_path:path, volume:defVol(kind), duration:Math.round(duration*10)/10, folder: upFolder() || null});
       if (error) throw error;
       item.classList.add("ok"); st.textContent = "pronto";
     } catch (e) {
@@ -262,11 +333,13 @@ async function addYouTube(){
     try { const r = await fetch("https://www.youtube.com/oembed?format=json&url=" + encodeURIComponent("https://www.youtube.com/watch?v=" + id)); if (r.ok) name = (await r.json()).title; } catch {}
   }
   name = (name || "Vídeo do YouTube").slice(0, 60);
-  const kind = upKind === "sfx" ? "music" : upKind;
-  const {error} = await sb.from("sounds").insert({name, kind, source:"youtube", yt_id:id, url:"https://www.youtube.com/watch?v=" + id, volume:defVol(kind)});
+  const kind = upKind;
+  const yt_start = parseTime($("#ytStart").value) ?? ytStart(link);
+  const yt_end = parseTime($("#ytEnd").value);
+  const {error} = await sb.from("sounds").insert({name, kind, source:"youtube", yt_id:id, url:"https://www.youtube.com/watch?v=" + id, volume:defVol(kind), yt_start: yt_start || null, yt_end: yt_end || null, folder: upFolder() || null});
   btn.disabled = false;
   if (error) { err.textContent = "Não salvei: " + error.message; return; }
-  $("#ytUrl").value = ""; $("#ytName").value = "";
+  $("#ytUrl").value = ""; $("#ytName").value = ""; $("#ytStart").value = ""; $("#ytEnd").value = "";
   const q = $("#queue"); const item = document.createElement("div"); item.className = "qitem ok";
   item.innerHTML = '<span class="n"></span><span class="s">salvo</span>'; item.querySelector(".n").textContent = name; q.appendChild(item);
 }
@@ -280,25 +353,28 @@ function openUpload(){
       <button data-k="ambient"><b>Ambiente</b><small>floresta, chuva, taverna</small></button>
       <button data-k="music"><b>Trilha</b><small>música de fundo</small></button>
     </div>
+    <label class="field">Pasta (opcional)<input id="upFolder" type="text" maxlength="40" list="folderList" placeholder="ex.: Floresta, Masmorra, Chefão"></label>
+    <datalist id="folderList">${folders().map(f => `<option value="${esc(f)}">`).join("")}</datalist>
     <div id="paneFile">
       <p>MP3, WAV, OGG, M4A e WEBM. Até 50 MB por arquivo.</p>
       <label class="drop" id="drop" for="fileIn">Arraste os arquivos aqui ou <u>escolha no computador</u></label>
       <input type="file" id="fileIn" accept="audio/*,.mp3,.wav,.ogg,.m4a,.webm,.flac" multiple hidden>
     </div>
     <div id="paneYt" hidden>
-      <p>Cole o link de um vídeo. Ele toca como Trilha ou Ambiente, sincronizado para todos. Efeitos precisam ser arquivos, porque o YouTube demora para começar.</p>
+      <p>Cole o link de um vídeo. Toca sincronizado para todos. Dá para escolher só um trecho: útil para pegar um efeito de um vídeo com vários sons.</p>
       <label class="field">Link do vídeo<input id="ytUrl" type="url" placeholder="https://www.youtube.com/watch?v=…"></label>
       <label class="field">Nome (opcional, pega o título do vídeo)<input id="ytName" type="text" maxlength="60"></label>
+      <div style="display:flex;gap:10px"><label class="field" style="flex:1">Começa em (opcional)<input id="ytStart" type="text" placeholder="0:12"></label><label class="field" style="flex:1">Termina em (opcional)<input id="ytEnd" type="text" placeholder="0:15"></label></div>
       <div class="login"><div class="err" id="ytErr"></div></div>
       <button class="btn primary" id="ytAdd">Salvar link</button>
     </div>
     <div class="queue" id="queue"></div>
     <div class="foot"><button class="btn" id="upClose">Fechar</button></div></div>`;
   document.body.appendChild(ov);
+  if (curFolder && curFolder !== "__fav") $("#upFolder").value = curFolder;
   const seg = $("#kindSeg");
   const paint = () => {
-    if (upTab === "yt" && upKind === "sfx") upKind = "music";
-    seg.querySelectorAll("button").forEach(b => { b.setAttribute("aria-pressed", b.dataset.k === upKind); b.disabled = upTab === "yt" && b.dataset.k === "sfx"; });
+    seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.k === upKind));
     ov.querySelectorAll("[role=tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === upTab));
     $("#paneFile").hidden = upTab !== "file"; $("#paneYt").hidden = upTab !== "yt";
   };
@@ -323,21 +399,34 @@ function closeMenu(){ if (openMenu) { openMenu.remove(); openMenu = null; } }
 function showMenu(s, anchor){
   closeMenu();
   const m = document.createElement("div"); m.className = "menu";
+  const isYt = s.source === "youtube";
   m.innerHTML = `<label>Nome<input type="text" id="mName" maxlength="60"></label>
     <label>Tipo<select id="mKind"><option value="sfx">Efeito</option><option value="ambient">Ambiente</option><option value="music">Trilha</option></select></label>
+    <label>Pasta<input type="text" id="mFolder" maxlength="40" list="mFolderList" placeholder="sem pasta"></label>
+    <datalist id="mFolderList">${folders().map(f => `<option value="${esc(f)}">`).join("")}</datalist>
+    <label>Lado<select id="mPan"><option value="-1">Esquerdo</option><option value="0">Centro (os dois)</option><option value="1">Direito</option></select></label>
+    ${isYt ? `<p class="sub" style="margin:-4px 0 0;text-transform:none;letter-spacing:0">Sons do YouTube sempre tocam nos dois lados.</p>
+    <div style="display:flex;gap:8px"><label style="flex:1">Começa em<input type="text" id="mStart" placeholder="0:00"></label><label style="flex:1">Termina em<input type="text" id="mEnd" placeholder="fim"></label></div>` : ""}
     <label>Volume padrão<input type="range" id="mVol" min="0" max="1" step="0.05"></label>
     <div class="acts"><button class="btn danger" id="mDel">Excluir</button><button class="btn primary" id="mSave">Salvar</button></div>`;
   document.body.appendChild(m); openMenu = m;
   $("#mName", m).value = s.name; $("#mKind", m).value = s.kind; $("#mVol", m).value = s.volume ?? 1;
-  if (s.source === "youtube") $("#mKind option[value=sfx]", m).disabled = true;
+  $("#mFolder", m).value = s.folder || "";
+  const pv = Number(s.pan) || 0; $("#mPan", m).value = pv < 0 ? "-1" : pv > 0 ? "1" : "0";
+  if (isYt) { $("#mPan", m).disabled = true; $("#mStart", m).value = s.yt_start ? fmtTime(s.yt_start) : ""; $("#mEnd", m).value = s.yt_end ? fmtTime(s.yt_end) : ""; }
   const r = anchor.getBoundingClientRect();
-  m.style.top = (window.scrollY + r.bottom + 4) + "px";
+  const top = window.scrollY + r.bottom + 4;
+  m.style.top = top + "px";
   m.style.left = Math.max(16, Math.min(window.scrollX + r.right - 240, document.documentElement.clientWidth - 256)) + "px";
+  // não deixa o menu sair da tela embaixo
+  const mh = m.offsetHeight; if (r.bottom + 4 + mh > window.innerHeight) m.style.top = Math.max(window.scrollY + 8, window.scrollY + r.top - mh - 4) + "px";
   $("#mSave", m).onclick = async () => {
-    const data = {name:$("#mName", m).value.trim() || s.name, kind:$("#mKind", m).value, volume:parseFloat($("#mVol", m).value)};
+    const data = {name:$("#mName", m).value.trim() || s.name, kind:$("#mKind", m).value, volume:parseFloat($("#mVol", m).value),
+      folder: $("#mFolder", m).value.trim().slice(0, 40) || null, pan: isYt ? 0 : parseFloat($("#mPan", m).value)};
+    if (isYt) { data.yt_start = parseTime($("#mStart", m).value) || null; data.yt_end = parseTime($("#mEnd", m).value) || null; }
     closeMenu();
     const {error} = await sb.from("sounds").update(data).eq("id", s.id);
-    if (error) toast("Não salvei: " + error.message);
+    if (error) toast("Não salvei: " + error.message); else toast("“" + data.name + "” salvo.");
   };
   const del = $("#mDel", m);
   del.onclick = async () => {
@@ -353,6 +442,11 @@ function showMenu(s, anchor){
     toast("“" + s.name + "” excluído.");
   };
 }
+async function toggleFav(s){
+  const {error} = await sb.from("sounds").update({favorite: !s.favorite}).eq("id", s.id);
+  if (error) toast("Não favoritei: " + error.message);
+}
+
 document.addEventListener("pointerdown", e => { if (openMenu && !openMenu.contains(e.target) && !e.target.closest("[data-menu]")) closeMenu(); });
 
 // ---------- login ----------
@@ -397,41 +491,60 @@ function renderStatus(){
 function renderGM(){
   const v = $("#view");
   if ($("#stage")) v.innerHTML = "";
-  const f = filter.toLowerCase(), match = s => !f || s.name.toLowerCase().includes(f);
-  const music = sounds.filter(s => s.kind === "music" && match(s));
-  const amb = sounds.filter(s => s.kind === "ambient" && match(s));
-  const sfxAll = sounds.filter(s => s.kind === "sfx"), sfx = sfxAll.filter(match);
+  const fl = folders();
+  if (curFolder && curFolder !== "__fav" && !fl.includes(curFolder)) curFolder = "";
+  const f = filter.toLowerCase();
+  const match = s => (!f || s.name.toLowerCase().includes(f) || (s.folder || "").toLowerCase().includes(f))
+    && (!curFolder || (curFolder === "__fav" ? s.favorite : (s.folder || "") === curFolder));
+  const order = (a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0);
+  const music = sounds.filter(s => s.kind === "music" && match(s)).sort(order);
+  const amb = sounds.filter(s => s.kind === "ambient" && match(s)).sort(order);
+  const sfx = sounds.filter(s => s.kind === "sfx" && match(s)).sort(order);
+  visibleSfx = sfx;
   const pv = A.preview?.sid;
   const yt = s => s.source === "youtube" ? '<span class="badge-yt">YT</span>' : "";
-  const tools = s => `<span class="tools"><button class="icon-btn" data-prev="${s.id}" title="Pré-ouvir só aqui" aria-label="Pré-ouvir ${esc(s.name)}" style="${pv === s.id ? "color:var(--brass)" : ""}">${ICON.ear}</button><button class="icon-btn" data-menu="${s.id}" title="Editar" aria-label="Editar ${esc(s.name)}">${ICON.dots}</button></span>`;
+  const sideTag = s => s.source !== "youtube" && Number(s.pan) ? `<span class="badge-side" title="toca no lado ${Number(s.pan) < 0 ? "esquerdo" : "direito"}">${Number(s.pan) < 0 ? "E" : "D"}</span>` : "";
+  const star = s => `<button class="icon-btn star ${s.favorite ? "on" : ""}" data-fav="${s.id}" title="${s.favorite ? "Tirar dos favoritos" : "Favoritar"}" aria-label="${s.favorite ? "Tirar dos favoritos" : "Favoritar"} ${esc(s.name)}" aria-pressed="${!!s.favorite}">${s.favorite ? ICON.starOn : ICON.star}</button>`;
+  const tools = s => `<span class="tools">${star(s)}<button class="icon-btn" data-prev="${s.id}" title="Pré-ouvir só aqui" aria-label="Pré-ouvir ${esc(s.name)}" style="${pv === s.id ? "color:var(--brass)" : ""}">${ICON.ear}</button><button class="icon-btn" data-menu="${s.id}" title="Editar, mover de pasta ou de tipo" aria-label="Editar ${esc(s.name)}">${ICON.dots}</button></span>`;
+  const count = k => k === "" ? sounds.length : k === "__fav" ? sounds.filter(s => s.favorite).length : sounds.filter(s => (s.folder || "") === k).length;
+  const chip = (k, label) => `<button class="fchip" data-folder="${esc(k)}" aria-pressed="${curFolder === k}">${label} <span>${count(k)}</span></button>`;
   const keep = document.activeElement?.id;
   v.innerHTML = `
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
     <button class="btn primary" id="upBtn">${ICON.up} Adicionar sons</button>
-    <input class="search" id="search" type="search" placeholder="Buscar som…" value="${esc(filter)}" aria-label="Buscar som">
+    <input class="search" id="search" type="search" placeholder="Buscar som ou pasta…" value="${esc(filter)}" aria-label="Buscar som">
     <span style="flex:1"></span>
+    <div class="sidesel" role="group" aria-label="Lado dos efeitos">
+      <span class="sub">Efeitos saem:</span>
+      <button data-side="-1" aria-pressed="${side === -1}">Esquerda</button>
+      <button data-side="" aria-pressed="${side === null}" title="Usa o lado configurado em cada som">Padrão</button>
+      <button data-side="1" aria-pressed="${side === 1}">Direita</button>
+    </div>
     <label class="sub" style="display:flex;align-items:center;gap:8px">${ICON.vol}<input type="range" id="myVol" min="0" max="1" step="0.05" value="${myVol}" aria-label="Volume só no seu PC"></label>
     <button class="btn danger" id="stopAll">${ICON.hush} Silêncio total</button>
   </div>
+  <nav class="folders" aria-label="Pastas">
+    ${chip("", "Todas")}${chip("__fav", ICON.starOn + " Favoritos")}${fl.map(n => chip(n, ICON.folder + " " + esc(n))).join("")}
+  </nav>
   <div class="board">
     <section class="sec music-sec">
       <div class="sec-head"><span class="swatch"></span><h2>Trilha</h2><span class="hint">uma por vez, em loop</span></div>
       ${music.length ? `<div class="list">${music.map(s => { const on = live.music?.sid === s.id;
         return `<div class="row ${on ? "active" : ""}"><button class="play" data-music="${s.id}" aria-label="${on ? "Parar" : "Tocar"} ${esc(s.name)}">${on ? ICON.stop : ICON.play}</button>
-        <span class="name">${esc(s.name)}${yt(s)}${on ? '<span class="eq"><i></i><i></i><i></i></span>' : ""}</span><span class="meta">${fmtDur(s.duration)}</span>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">Nenhuma trilha ainda. Use “Adicionar sons”: arquivo ou link do YouTube.</div>`}
+        <span class="name">${esc(s.name)}${yt(s)}${sideTag(s)}${on ? '<span class="eq"><i></i><i></i><i></i></span>' : ""}</span><span class="meta">${fmtDur(s.duration)}</span>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhuma trilha aqui." : "Nenhuma trilha ainda. Use “Adicionar sons”."}</div>`}
       ${live.music ? `<div class="live-vol">Volume da trilha <input type="range" id="musicVol" min="0" max="1" step="0.02" value="${live.music.vol ?? .8}"></div>` : ""}
     </section>
     <section class="sec amb-sec">
       <div class="sec-head"><span class="swatch"></span><h2>Ambiente</h2><span class="hint">camadas somam, em loop</span></div>
       ${amb.length ? `<div class="amb-grid">${amb.map(s => { const on = !!live.amb?.[s.id];
         return `<div class="amb ${on ? "on" : ""}"><button class="toggle" data-amb="${s.id}" aria-pressed="${on}"><span class="sw"></span><span>${esc(s.name)}</span></button>
-        ${on ? `<input type="range" min="0" max="1" step="0.02" value="${live.amb[s.id].vol ?? .7}" data-ambvol="${s.id}" aria-label="Volume de ${esc(s.name)}">` : `<span class="sub">${fmtDur(s.duration) || "&nbsp;"}${yt(s)}</span>`}
-        ${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">Nenhum ambiente ainda.</div>`}
+        ${on ? `<input type="range" min="0" max="1" step="0.02" value="${live.amb[s.id].vol ?? .7}" data-ambvol="${s.id}" aria-label="Volume de ${esc(s.name)}">` : `<span class="sub">${fmtDur(s.duration) || "&nbsp;"}${yt(s)}${sideTag(s)}</span>`}
+        ${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum ambiente aqui." : "Nenhum ambiente ainda."}</div>`}
     </section>
     <section class="sec sfx-sec">
       <div class="sec-head"><span class="swatch"></span><h2>Efeitos</h2><span class="hint">toca uma vez para todos · atalhos no teclado</span></div>
-      ${sfx.length ? `<div class="pads">${sfx.map(s => { const k = KEYS[sfxAll.indexOf(s)];
-        return `<div class="pad-wrap"><button class="pad" data-id="${s.id}" data-sfx="${s.id}" style="width:100%">${k ? `<span class="key">${k}</span>` : ""}<span class="pname">${esc(s.name)}</span></button>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">Nenhum efeito ainda.</div>`}
+      ${sfx.length ? `<div class="pads">${sfx.map((s, i) => { const k = KEYS[i];
+        return `<div class="pad-wrap"><button class="pad ${s.favorite ? "fav" : ""}" data-id="${s.id}" data-sfx="${s.id}" style="width:100%">${k ? `<span class="key">${k}</span>` : ""}<span class="pname">${esc(s.name)}${yt(s)}${sideTag(s)}</span></button>${tools(s)}</div>`; }).join("")}</div>` : `<div class="empty">${curFolder ? "Nenhum efeito aqui." : "Nenhum efeito ainda."}</div>`}
     </section>
   </div>`;
   $("#upBtn").onclick = openUpload;
@@ -441,11 +554,15 @@ function renderGM(){
   $("#myVol").oninput = e => setMyVol(parseFloat(e.target.value));
   const mv = $("#musicVol"); if (mv) mv.oninput = e => setLiveVol("music", null, parseFloat(e.target.value));
   v.querySelectorAll("[data-ambvol]").forEach(r => r.oninput = e => setLiveVol("amb", r.dataset.ambvol, parseFloat(e.target.value)));
+  v.querySelectorAll("[data-folder]").forEach(b => b.onclick = () => { curFolder = b.dataset.folder; try { localStorage.setItem("mesa.folder", curFolder); } catch {} render(); });
+  v.querySelectorAll("[data-side]").forEach(b => b.onclick = () => { side = b.dataset.side === "" ? null : Number(b.dataset.side); render(); });
 }
+
 $("#view").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b || !isGM) return;
-  const s = byId(b.dataset.music || b.dataset.amb || b.dataset.sfx || b.dataset.prev || b.dataset.menu);
+  const s = byId(b.dataset.music || b.dataset.amb || b.dataset.sfx || b.dataset.prev || b.dataset.menu || b.dataset.fav);
   if (!s) return;
+  if (b.dataset.fav) return toggleFav(s);
   A.init(); ensureJoinedGM();
   if (b.dataset.music) playMusic(s);
   else if (b.dataset.amb) toggleAmb(s);
@@ -498,7 +615,7 @@ document.addEventListener("keydown", e => {
   if (e.target.closest("input,select,textarea") || $(".overlay")) return;
   if (e.key === "Escape") { closeMenu(); return; }
   const i = KEYS.indexOf(e.key.toUpperCase()); if (i < 0) return;
-  const s = sounds.filter(x => x.kind === "sfx")[i]; if (!s) return;
+  const s = visibleSfx[i]; if (!s) return;
   e.preventDefault(); ensureJoinedGM(); fireSfx(s);
 });
 
@@ -540,7 +657,8 @@ async function boot(){
   chan.on("broadcast", {event:"sfx"}, ({payload}) => {
     const s = byId(payload?.sid); if (!s) return;
     const vol = Math.max(0, Math.min(1, Number(payload?.vol ?? 1)));
-    if (joined) A.sfx(s, vol);
+    const pan = Math.max(-1, Math.min(1, Number(payload?.pan ?? s.pan ?? 0)));
+    if (joined) A.sfx(s, vol, pan);
     lastSfx = s.name;
     if (!isGM) { const f = $("#flash"); if (f) { f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); } renderPlayer(); }
     else flashPad(s.id);
