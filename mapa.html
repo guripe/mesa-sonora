@@ -345,7 +345,7 @@ input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:tex
 .gnum{display:grid;grid-template-columns:1fr 64px auto;align-items:center;gap:6px;font-size:13px;color:var(--ink2);margin:0}
 .gnum input{width:64px;padding:5px 6px}
 .gnum small{color:var(--ink3);font-size:11px;min-width:0}
-.maps-panel{width:400px}
+.maps-panel{width:440px}
 .mcur{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
 .mcur small{color:var(--ink3)}
 #mForm{display:grid;grid-template-columns:1fr auto auto;gap:6px;margin-top:8px}
@@ -356,11 +356,11 @@ input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:tex
 .mft{flex:1;text-align:left;background:none;border:0;color:var(--brass);font:700 15px/1.2 var(--display);cursor:pointer;padding:4px 2px}
 .mft small{color:var(--ink3);font:500 12px var(--body,inherit)}
 .mlist{display:flex;flex-direction:column;gap:5px;margin-top:6px}
-.mrow{display:grid;grid-template-columns:44px 1fr auto auto auto auto;align-items:center;gap:5px;padding:5px;border:1px solid var(--line);border-radius:9px;background:var(--card);cursor:grab}
+.mrow{display:flex;align-items:center;gap:5px;padding:5px;border:1px solid var(--line);border-radius:9px;background:var(--card);cursor:grab}
 .mrow.on{border-color:var(--brass)}
 .mthumb{width:44px;height:32px;border-radius:5px;overflow:hidden;background:#2a241d;display:grid;place-items:center;font-size:18px}
 .mthumb img{width:100%;height:100%;object-fit:cover}
-.mname{min-width:0}
+.mname{min-width:0;flex:1}
 .mname b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);font-size:14px}
 .mname small{color:var(--ink3);font-size:11px}
 .btn.ic{padding:4px 7px;min-width:0}
@@ -418,6 +418,27 @@ input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:tex
 .hvtxt{padding:14px 18px;font-size:16px;line-height:1.55;overflow:auto;max-height:40vh;white-space:normal}
 .hvhead a.btn{color:var(--ink);text-decoration:none}
 .hpopchoose{position:fixed;inset:0;z-index:41;display:grid;place-items:center;background:rgba(8,6,5,.5)}
+
+/* v18: voz */
+.vdock{position:fixed;right:10px;bottom:10px;z-index:9;display:flex;flex-direction:column;gap:6px;width:min(280px,calc(100vw - 20px));background:rgba(23,19,15,.94);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.vdock:has(.vjoin){background:none;border:0;box-shadow:none;padding:0;width:auto;align-items:flex-end}
+.vjoin{box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.vhead{display:flex;align-items:center;gap:4px}
+.vtog{flex:1;text-align:left;background:none;border:0;color:var(--brass);font:700 15px/1 var(--display);cursor:pointer;padding:4px}
+.vtog small{color:var(--ink3);font:500 12px var(--body)}
+.vlist{display:flex;flex-direction:column;gap:3px;max-height:30vh;overflow:auto}
+.vp{display:grid;grid-template-columns:12px 1fr auto;align-items:center;gap:2px 6px;padding:4px 6px;border-radius:8px;background:var(--card)}
+.vp b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vp small{color:var(--ink3);font-size:11px}
+.vp input[type=range]{grid-column:2/4;width:100%;height:14px}
+.vdot{width:10px;height:10px;border-radius:50%;background:#4a3d30;transition:background .1s,box-shadow .1s}
+.vp.talk .vdot{background:#7fe08e;box-shadow:0 0 8px #7fe08e}
+.vmod{border-top:1px solid var(--line);padding-top:6px;font-size:13px}
+.vpre{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+.vpre button{padding:4px 7px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--ink);font-size:12px;cursor:pointer}
+.vpre button[aria-pressed="true"]{background:var(--brass);color:var(--brass-ink);border-color:var(--brass)}
+.vmod select{width:100%}
+.vwhisper{position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:30;background:rgba(40,30,60,.95);border:1px solid #9a7ad8;color:#e8dcff;padding:8px 14px;border-radius:999px;font-weight:700;box-shadow:0 8px 22px rgba(0,0,0,.5)}
+@media (max-width:1100px){.vdock{bottom:64px}}
 </style>
 </head>
 <body>
