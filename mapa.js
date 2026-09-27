@@ -3025,6 +3025,41 @@ const dShape = d => DIE_SHAPE[d] || "circle(48%)", dColor = d => DIE_COLOR[d] ||
 const DEF_PRESETS = [{n: "Teste (d20)", f: "1d20"}, {n: "Ataque", f: "1d20+3"}, {n: "Dano", f: "1d8+2"}, {n: "Vantagem", f: "2d20kh1"}];
 let presets = (() => { try { const v = JSON.parse(localStorage.getItem("mesa.presets")); return Array.isArray(v) ? v : DEF_PRESETS.slice(); } catch { return DEF_PRESETS.slice(); } })();
 const savePresets = () => { try { localStorage.setItem("mesa.presets", JSON.stringify(presets)); } catch {} };
+// barra de atalhos (estilo Baldur's Gate): 2 fileiras, arrasta para trocar, cor e emoji em cada habilidade
+const HB_COLS = 10, HB_ROWS = 2, HB_N = HB_COLS * HB_ROWS;
+const HB_EMOJI = ["🎲", "⚔️", "🗡️", "🏹", "🪓", "🛡️", "👊", "🔥", "❄️", "⚡", "🌀", "✨", "💥", "🎯", "☠️", "💀", "🩸", "💚", "🍀", "🧪", "🔮", "📜", "👁️", "🐾", "🌙", "☀️", "🌊", "🪨", "🗣️", "🎵", "🍺", "💰"];
+const HB_COLORS = ["#7a1f1f", "#8a4a14", "#7a6414", "#2f6a24", "#1f5a6a", "#23408a", "#4a2a7e", "#6a2452", "#3a3530"];
+let hotbar = (() => {
+  try { const v = JSON.parse(localStorage.getItem("mesa.hotbar")); if (Array.isArray(v)) return Array.from({length: HB_N}, (_, i) => v[i] || null); } catch {}
+  const out = Array(HB_N).fill(null); presets.forEach((p, i) => { if (i < HB_N) out[i] = {n: p.n, f: p.f, c: HB_COLORS[(i * 2) % HB_COLORS.length], e: ["🎲", "⚔️", "💥", "🍀"][i] || "🎲"}; }); return out;
+})();
+const saveHotbar = () => { try { localStorage.setItem("mesa.hotbar", JSON.stringify(hotbar)); } catch {} };
+function hbAdd(p){ const i = hotbar.findIndex(x => !x); if (i < 0) { toast("A barra está cheia. Apague um atalho (clique direito nele)."); return -1; } hotbar[i] = p; saveHotbar(); drawDiceBar(); return i; }
+function hbEditor(i){
+  const p = {...(hotbar[i] || {n: "", f: "1d20", c: HB_COLORS[i % HB_COLORS.length], e: "🎲"})}, isNew = !hotbar[i];
+  let el = $("#hbEdit"); if (!el) { el = document.createElement("div"); el.id = "hbEdit"; el.className = "hbedit"; document.body.appendChild(el); }
+  const draw = () => {
+    el.innerHTML = `<div class="hbe-top"><span class="hbs full big" style="--hc:${esc(p.c)}"><span class="hbe">${esc(p.e || "🎲")}</span><span class="hbn">${esc(p.n || "…")}</span></span>
+        <div class="hbe-f"><input id="hbN" maxlength="24" placeholder="Nome (ex.: Ataque furioso)" value="${esc(p.n)}"><input id="hbF" maxlength="40" placeholder="Fórmula (ex.: 1d20+5)" value="${esc(p.f)}"><div class="dm-err" id="hbErr"></div></div></div>
+      <div class="lbl">Emoji</div><div class="hbe-emo">${HB_EMOJI.map(x => `<button data-he="${x}" aria-pressed="${p.e === x}">${x}</button>`).join("")}<input id="hbEc" maxlength="4" placeholder="outro" value="${HB_EMOJI.includes(p.e) ? "" : esc(p.e || "")}" title="Cole qualquer emoji"></div>
+      <div class="lbl">Cor</div><div class="hbe-col">${HB_COLORS.map(c => `<button data-hc="${c}" style="background:${c}" aria-pressed="${p.c === c}" aria-label="Cor ${c}"></button>`).join("")}<input type="color" id="hbCc" value="${esc(p.c)}" title="Outra cor"></div>
+      <div class="acts foot">${isNew ? "" : `<button class="btn small danger" id="hbDel">Remover</button>`}<button class="btn small" id="hbTry">🎲 Testar</button><span class="spacer"></span><button class="btn small" id="hbX">Cancelar</button><button class="btn small primary" id="hbOk">Salvar</button></div>`;
+    const q = s => el.querySelector(s);
+    q("#hbN").oninput = e => { p.n = e.target.value; el.querySelector(".hbe-top .hbn").textContent = p.n || "…"; };
+    q("#hbF").oninput = e => { p.f = e.target.value; q("#hbErr").textContent = ""; };
+    el.querySelectorAll("input").forEach(x => x.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") q("#hbOk").click(); if (e.key === "Escape") el.remove(); });
+    q(".hbe-emo").onclick = e => { const b = e.target.closest("[data-he]"); if (b) { p.e = b.dataset.he; draw(); } };
+    q("#hbEc").oninput = e => { if (e.target.value.trim()) { p.e = e.target.value.trim(); el.querySelector(".hbe-top .hbe").textContent = p.e; } };
+    q(".hbe-col").onclick = e => { const b = e.target.closest("[data-hc]"); if (b) { p.c = b.dataset.hc; draw(); } };
+    q("#hbCc").oninput = e => { p.c = e.target.value; el.querySelector(".hbe-top .hbs").style.setProperty("--hc", p.c); };
+    const ok = () => { try { parseFormula(p.f); return true; } catch (err) { q("#hbErr").textContent = "Fórmula: " + err.message; return false; } };
+    q("#hbTry").onclick = () => { if (ok()) doRoll(p.f, 0, p.n || "Atalho", false); };
+    q("#hbX").onclick = () => el.remove();
+    q("#hbOk").onclick = () => { if (!ok()) return; hotbar[i] = {n: (p.n || "Rolagem").slice(0, 24), f: p.f.replace(/\s+/g, ""), c: p.c, e: p.e || "🎲"}; saveHotbar(); drawDiceBar(); el.remove(); };
+    if (q("#hbDel")) q("#hbDel").onclick = () => { hotbar[i] = null; saveHotbar(); drawDiceBar(); el.remove(); };
+  };
+  draw(); setTimeout(() => el.querySelector("#hbN")?.focus(), 30);
+}
 let diceCounts = {}, diceMod = 0, diceAdv = 0, diceSecret = false, diceLog = [], diceText = "", diceModal = false, lastResult = null;
 const dieEl = (d, v, cls = "") => `<span class="die d${d} ${cls}" style="--dc:${dColor(d)};--shape:${dShape(d)}"><span class="die-n">${v}</span></span>`;
 const rnd = x => 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * x);
@@ -3145,11 +3180,17 @@ function drawDiceLog(fresh){
 function drawDiceBar(){
   let el = $("#diceBar"); if (!el) { el = document.createElement("div"); el.id = "diceBar"; el.className = "dicebar"; document.body.appendChild(el); }
   el.innerHTML = `<button class="btn dice-main" id="dOpen" title="Abrir a mesa de dados">🎲 Rolar dados</button>
-    <div class="presets" role="toolbar" aria-label="Rolagens prontas">${presets.map((p, i) => `<button class="btn pchip" data-pre="${i}" title="${esc(p.f)}">${esc(p.n)}${p.snd?.u ? " 🔊" : ""}<small>${esc(p.f)}</small></button>`).join("")}
-    <button class="btn pchip pedit" id="dEditPre" title="Criar e editar rolagens prontas" aria-label="Editar rolagens prontas">✎</button></div>`;
+    <div class="hotbar" role="toolbar" aria-label="Barra de atalhos">${hotbar.map((p, i) => p ? `<button class="hbs full" data-hs="${i}" style="--hc:${esc(p.c || "#3a3530")}" title="${esc(p.n)} · ${esc(p.f)}&#10;Clique: rolar · Arraste: trocar de lugar · Clique direito: editar"><span class="hbe">${esc(p.e || "🎲")}</span><span class="hbn">${esc(p.n)}</span></button>` : `<button class="hbs" data-hs="${i}" title="Espaço vazio: clique para criar um atalho" aria-label="Espaço vazio"></button>`).join("")}</div>`;
   $("#dOpen").onclick = () => openDiceModal();
-  $("#dEditPre").onclick = () => openDiceModal("presets");
-  el.querySelector(".presets").onclick = e => { const b = e.target.closest("[data-pre]"); if (b) { const p = presets[+b.dataset.pre]; doRoll(p.f, 0, p.n, false, p.snd); } };
+  const hb = el.querySelector(".hotbar"); let from = null;
+  hb.onclick = e => { const b = e.target.closest("[data-hs]"); if (!b) return; const i = +b.dataset.hs, p = hotbar[i]; if (p) doRoll(p.f, 0, p.n, false); else hbEditor(i); };
+  hb.oncontextmenu = e => { const b = e.target.closest("[data-hs]"); if (!b) return; e.preventDefault(); hbEditor(+b.dataset.hs); };
+  hb.onmousedown = e => { const b = e.target.closest(".hbs.full"); if (b) b.draggable = true; };
+  hb.ondragstart = e => { const b = e.target.closest(".hbs.full"); if (!b) return; from = +b.dataset.hs; e.dataTransfer.setData("text/mesa-hb", String(from)); e.dataTransfer.effectAllowed = "move"; b.classList.add("dragging"); };
+  hb.ondragover = e => { const b = e.target.closest("[data-hs]"); if (from == null || !b) return; e.preventDefault(); hb.querySelectorAll(".over").forEach(x => x !== b && x.classList.remove("over")); b.classList.add("over"); };
+  hb.ondragleave = e => { const b = e.target.closest("[data-hs]"); if (b && !b.contains(e.relatedTarget)) b.classList.remove("over"); };
+  hb.ondrop = e => { const b = e.target.closest("[data-hs]"); if (from == null || !b) return; e.preventDefault(); const to = +b.dataset.hs; [hotbar[from], hotbar[to]] = [hotbar[to], hotbar[from]]; from = null; saveHotbar(); drawDiceBar(); };
+  hb.ondragend = () => { from = null; hb.querySelectorAll(".over,.dragging").forEach(x => x.classList.remove("over", "dragging")); };
 }
 function openDiceModal(focus){
   diceModal = true;
@@ -3175,11 +3216,10 @@ function openDiceModal(focus){
         <div class="dm-result ${nat}" id="dmResult">${r ? `<div class="dm-faces">${facesHTML(r, true)}</div><div class="dm-total">${r.fresh ? "…" : r.total}</div><div class="sub">${esc(r.label ? r.label + " · " : "")}${esc(r.f)}</div>${!r.fresh && nat === "crit" ? '<div class="crit-tag">⚔️ CRÍTICO! 20 natural</div>' : ""}${!r.fresh && nat === "fumble" ? '<div class="fumble-tag">💀 FALHA CRÍTICA… 1 natural</div>' : ""}` : `<div class="sub">Escolha os dados ou use uma rolagem pronta.</div>`}</div>
       </div>
       <div class="dm-right">
-        <div class="dm-k">Rolagens prontas <span class="sub">(só neste computador)</span></div>
-        <div class="dm-pres" id="dmPres">${presets.map((p, i) => `<div class="dm-pre"><input data-pn="${i}" value="${esc(p.n)}" maxlength="24" aria-label="Nome da rolagem"><input data-pf="${i}" value="${esc(p.f)}" maxlength="40" aria-label="Fórmula"><button class="btn small primary" data-prr="${i}" title="Rolar">🎲</button><button class="btn small" data-pup="${i}" title="Subir" ${i ? "" : "disabled"}>↑</button><button class="btn small danger" data-pdel="${i}" title="Apagar">✕</button>
-          <div class="dm-snd"><span title="Som que toca para todos quando rolar">🔊</span><input data-psu="${i}" value="${esc(p.snd?.u || "")}" placeholder="som: link do YouTube ou .mp3 (opcional)" aria-label="Som da rolagem"><input data-pss="${i}" value="${fmtT(p.snd?.s)}" placeholder="início" aria-label="Começa em"><input data-pse="${i}" value="${fmtT(p.snd?.e)}" placeholder="fim" aria-label="Termina em"><button class="btn small" data-pt="${i}" title="Ouvir só aqui">▶</button></div></div>`).join("") || `<p class="hint">Nenhuma ainda.</p>`}</div>
-        <button class="btn small" id="dmNewPre">＋ Nova rolagem pronta</button>
-        <p class="hint">Aparecem como botões ao lado de “Rolar dados”. Use <b>kh</b>/<b>kl</b> para ficar com os maiores/menores: <b>2d20kh1</b> = vantagem, <b>4d6kh3</b> = atributo.</p>
+        <div class="dm-k">Barra de atalhos <span class="sub">(só neste computador)</span></div>
+        <div class="dm-hbmini">${hotbar.map((p, i) => p ? `<span class="hbs full" style="--hc:${esc(p.c)}" title="${esc(p.n)} · ${esc(p.f)}"><span class="hbe">${esc(p.e || "🎲")}</span></span>` : `<span class="hbs"></span>`).join("")}</div>
+        <p class="hint">Seus atalhos ficam na barra embaixo da tela, como no Baldur's Gate: <b>clique</b> num espaço vazio para criar, <b>clique direito</b> para editar (nome, fórmula, cor e emoji) e <b>arraste</b> para trocar de lugar. Aqui, “☆ Salvar como atalho” coloca a fórmula atual na barra.</p>
+        <p class="hint">Use <b>kh</b>/<b>kl</b> para ficar com os maiores/menores: <b>2d20kh1</b> = vantagem, <b>4d6kh3</b> = atributo.</p>
         <div class="dm-k" style="margin-top:12px">Últimas rolagens</div>
         <div class="dm-hist">${diceLog.slice(-8).reverse().map(x => `<div><b>${esc(x.who)}</b> ${esc(x.label || x.f)} → <b class="${natOf(x)}">${x.fresh ? "…" : x.total}</b></div>`).join("") || `<p class="hint">Nada ainda.</p>`}</div>
       </div>
@@ -3205,26 +3245,9 @@ function openDiceModal(focus){
   q("#dmSave").onclick = () => {
     try { parseFormula(diceText); } catch (err) { q("#dmErr").textContent = "Fórmula: " + err.message; return; }
     const f = diceAdv && /(^|[^\d])1?d20(?!\d)/.test(diceText) ? diceText.replace(/(^|[^\d])1?d20(?!\d|k)/, `$12d20${diceAdv > 0 ? "kh1" : "kl1"}`) : diceText;
-    presets.push({n: "Nova rolagem", f: f.replace(/\s+/g, "")}); savePresets(); drawDiceBar(); openDiceModal("presets");
-    setTimeout(() => { const i = m.querySelector(`[data-pn="${presets.length - 1}"]`); i?.focus(); i?.select(); }, 0);
+    const i = hbAdd({n: "Nova rolagem", f: f.replace(/\s+/g, ""), c: HB_COLORS[0], e: "🎲"}); if (i >= 0) { closeDiceModal(); hbEditor(i); }
   };
-  const pres = q("#dmPres");
-  pres.oninput = e => {
-    const ds = e.target.dataset, i = ds.pn ?? ds.pf ?? ds.psu ?? ds.pss ?? ds.pse; if (i == null) return; const p = presets[+i];
-    if (ds.pn != null) p.n = e.target.value; else if (ds.pf != null) p.f = e.target.value;
-    else { const u = m.querySelector(`[data-psu="${i}"]`).value.trim(); p.snd = u ? {u, s: tsec(m.querySelector(`[data-pss="${i}"]`).value), e: tsec(m.querySelector(`[data-pse="${i}"]`).value)} : null; }
-    savePresets(); drawDiceBar();
-  };
-  pres.onkeydown = e => e.stopPropagation();
-  pres.onclick = e => {
-    const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.pt != null) { const p = presets[+b.dataset.pt]; if (!cleanSnd(p.snd)) { q("#dmErr").textContent = "Coloque um link começando com https:// (YouTube ou arquivo de áudio)."; return; } playSnd(p.snd); return; }
-    if (b.dataset.prr != null) { const p = presets[+b.dataset.prr]; try { parseFormula(p.f); } catch (err) { q("#dmErr").textContent = `“${p.n}”: ${err.message}`; return; } doRoll(p.f, 0, p.n, isGM && diceSecret, p.snd); }
-    else if (b.dataset.pup != null) { const i = +b.dataset.pup; [presets[i - 1], presets[i]] = [presets[i], presets[i - 1]]; savePresets(); drawDiceBar(); redraw(); }
-    else if (b.dataset.pdel != null) { presets.splice(+b.dataset.pdel, 1); savePresets(); drawDiceBar(); redraw(); }
-  };
-  q("#dmNewPre").onclick = () => { presets.push({n: "Nova rolagem", f: "1d20"}); savePresets(); drawDiceBar(); openDiceModal("presets"); setTimeout(() => { const i = m.querySelector(`[data-pn="${presets.length - 1}"]`); i?.focus(); i?.select(); }, 0); };
-  if (focus === "presets") q("#dmPres")?.scrollIntoView({block: "nearest"}); else if (!focus) {}
+
 }
 addEventListener("keydown", e => { if (e.key === "Escape" && diceModal) { e.preventDefault(); closeDiceModal(); } }, true);
 function closeDiceModal(){ diceModal = false; $("#diceModal")?.remove(); }
