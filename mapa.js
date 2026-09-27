@@ -266,6 +266,7 @@ function paint(){
   paintReach();
   paintRollGM();
   paintPings();
+  paintDropPrev();
   // réguas
   for (const k in rulers) paintRuler(rulers[k], k === myKey);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -754,7 +755,7 @@ function openAssets(){
     <input type="search" id="aQ" placeholder="Procurar (cavalo, baú, tocha…)" value="${esc(assetQ)}" autocomplete="off">
     <div class="afolders" id="aCats" role="tablist">${cats.map(c => `<button role="tab" data-cat="${esc(c)}" aria-selected="${assetCat === c}">${ACAT_IC[c] || "📁"} ${esc(c)}<small>${ASSETS.filter(a => a.cat === c).length}</small></button>`).join("")}<button role="tab" data-cat="light" aria-selected="${assetCat === "light"}">✨ Que iluminam<small>${ASSETS.filter(a => a.li).length}</small></button><button role="tab" data-cat="mine" aria-selected="${assetCat === "mine"}">⭐ Meus assets<small>${myAssets.length}</small></button></div>
     <div id="aBody"></div>
-    <p class="hint">Clique para colocar no mapa (no último lugar em que você clicou). Arraste, gire pela bolinha branca e edite com dois cliques. ✨ = ilumina no escuro.</p></div>`;
+    <p class="hint"><b>Arraste para o mapa</b> (ou clique: vai para o último lugar clicado). Depois arraste, gire pela bolinha branca e edite com dois cliques. Dá para soltar uma imagem do seu computador direto no mapa. ✨ = ilumina no escuro.</p></div>`;
   $("#pClose").onclick = closePanel;
   const card = (a, key, mine) => `<button class="asset" data-${mine ? "my" : "as"}="${key}" title="${esc(a.n)} · ${a.w}×${a.h} casas${a.blk ? " · bloqueia visão" : ""}${a.li ? " · ilumina" : ""}"><span class="athumb"><img src="${esc(mine ? a.src : `/assets/${a.path || a.id + ".svg"}`)}" alt="" loading="lazy">${a.li ? `<i class="alight" style="--lc:${esc(a.li.c)}">✨</i>` : ""}</span><span class="aname">${esc(a.n)}</span><small>${a.w}×${a.h}</small></button>`;
   const body = () => {
@@ -876,7 +877,7 @@ function paintDoors(c = ctx){ // portas bem marcadas (as secretas não aparecem 
 
 // ---------- gerador de masmorras ----------
 function rng(seed){ let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const genOpt = Object.assign({style: "dungeon", w: 70, h: 50, rooms: 12, rmin: 4, rmax: 10, cw: 0, gap: 5, doors: 70, secret: 1, dead: 2, traps: 2, deco: "normal", torches: true, dark: true, seed: 1 + Math.floor(Math.random() * 99999)},
+const genOpt = Object.assign({style: "dungeon", w: 70, h: 50, rooms: 12, rmin: 4, rmax: 10, cw: 0, gap: 5, dens: "normal", season: "verao", clear: "camp", pond: true, animals: true, treeBlk: false, houses: 10, market: true, fields: true, ikind: "taverna", graves: "normal", mauso: true, doors: 70, secret: 1, dead: 2, traps: 2, deco: "normal", torches: true, dark: true, seed: 1 + Math.floor(Math.random() * 99999)},
   (() => { try { const o = JSON.parse(localStorage.getItem("mesa.genopt")) || {}; if (!o.v2) { delete o.w; delete o.h; delete o.rooms; delete o.rmin; delete o.rmax; delete o.cw; o.v2 = 1; } return o; } catch { return {}; } })());
 const saveGenOpt = () => { try { localStorage.setItem("mesa.genopt", JSON.stringify(genOpt)); } catch {} };
 const ROOMT = {
@@ -934,6 +935,7 @@ function caveContour(T, W, H){ // marching squares nos centros das casas: chão 
   return {polys, segs: clean};
 }
 function genMap(o){
+  if (OUT_STYLES.has(o.style)) return genScenery(o);
   const R = rng(o.seed), ri = (a, b) => a + Math.floor(R() * (b - a + 1)), pick = a => a[Math.floor(R() * a.length)];
   const W = Math.max(16, Math.min(160, o.w | 0)), H = Math.max(12, Math.min(160, o.h | 0)), GAP = Math.max(2, Math.min(12, o.gap ?? 5));
   let T = new Uint8Array(W * H); const RID = new Int16Array(W * H).fill(-1);
@@ -1077,6 +1079,7 @@ function genMap(o){
 const genCache = {sig: "", cv: null};
 const hash2 = (x, y, s = 0) => { let h = (x * 374761393 + y * 668265263 + s * 2246822519) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 function renderGen(g, S, cvIn){
+  if (OUT_STYLES.has(g.style)) return renderOutdoor(g, S, cvIn);
   const W = g.w, H = g.h, cvx = cvIn || document.createElement("canvas"); cvx.width = Math.ceil(W * S); cvx.height = Math.ceil(H * S);
   const x = cvx.getContext("2d"), at = (a, b) => a < 0 || b < 0 || a >= W || b >= H ? 0 : +g.t[b * W + a];
   x.fillStyle = "#14100d"; x.fillRect(0, 0, cvx.width, cvx.height);
@@ -1126,12 +1129,12 @@ function applyGen(res, o){
   if (G().type === "hex") scene.grid = {...scene.grid, type: "square"};
   const S = G().size, gx = G().ox || 0, gy = G().oy || 0, P = (x, y) => [Math.round((gx + x * S) * 10) / 10, Math.round((gy + y * S) * 10) / 10];
   scene.walls = res.walls.map(s => ({p: [...P(s[0], s[1]), ...P(s[2], s[3])]})).concat(res.doors.map(d => ({p: [...P(d[0], d[1]), ...P(d[2], d[3])], d: 1, o: 0, ...(d[4] ? {s: 1} : {})})));
-  Object.assign(scene, {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, roll: null, gen: {v: 1, style: res.style, w: res.w, h: res.h, t: res.t, x0: gx, y0: gy, s: S, seed: o.seed}});
-  if (o.dark) scene.light = "dark";
+  Object.assign(scene, {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, roll: null, gen: {v: 1, style: res.style, w: res.w, h: res.h, t: res.t, iw: res.iw || null, x0: gx, y0: gy, s: S, seed: o.seed}});
+  if (o.dark) scene.light = "dark"; else if (OUT_STYLES.has(res.style)) scene.light = "day";
   const U = G().unit || 1, chars = freshDungeonTokens();
   drawings = drawings.filter(d => d.t !== "tpl"); save("drawings");
   const pr = res.props.map(p => { const a = ASSETS.find(x => x.id === p.id); if (!a) return null; const [x, y] = P(p.cx, p.cy);
-    const t = {id: uid(), k: "prop", n: a.n, img: `/assets/${a.path || a.id + ".svg"}`, pw: a.w, ph: a.h, a: p.a || 0, blk: p.trap ? null : (a.blk || null), sn: true, x, y};
+    const t = {id: uid(), k: "prop", n: a.n, img: `/assets/${a.path || a.id + ".svg"}`, pw: a.w, ph: a.h, a: p.a || 0, blk: p.trap || p.noblk ? null : (a.blk || null), sn: true, x, y};
     if (p.h) t.h = true; if (a.li) t.li = {rb: a.li.b * U, rd: a.li.d * U, ang: 360, c: a.li.c}; return t; }).filter(Boolean);
   // personagens vão para a entrada
   if (res.start) {
@@ -1147,33 +1150,36 @@ function applyGen(res, o){
 let genRes = null, genT = null;
 function openGenPanel(){
   if (genOpt.style === "rolled") return openRollPanel();
-  panelKind = "gen"; const o = genOpt, cave = o.style === "cave";
+  panelKind = "gen"; const o = genOpt, cave = o.style === "cave", outer = OUT_STYLES.has(o.style);
   const num = (id, label, v, min, max, unit = "") => `<label class="gnum"><span>${label}</span><input type="number" id="${id}" min="${min}" max="${max}" value="${v}">${unit ? `<small>${unit}</small>` : ""}</label>`;
-  $("#panel").innerHTML = `<div class="panel gen-panel" role="dialog" aria-label="Gerador de masmorras"><h3>Gerador de masmorras <button class="btn small" id="pClose">Fechar</button></h3>
-    <canvas id="genPrev" width="388" height="280" aria-label="Prévia da masmorra"></canvas>
-    <div class="seg" id="gStyle" style="margin:10px 0 4px"><button data-st="dungeon" aria-pressed="${!cave}">🏰 Masmorra</button><button data-st="cave" aria-pressed="${cave}">⛰ Caverna</button><button data-st="rolled" title="Vai criando a masmorra enquanto os jogadores exploram">🎲 Rolada</button></div>
-    <div class="ggrid">
+  $("#panel").innerHTML = `<div class="panel gen-panel" role="dialog" aria-label="Gerador de masmorras"><h3>Gerador de cenários <button class="btn small" id="pClose">Fechar</button></h3>
+    ${styleTabs(o.style)}
+    <canvas id="genPrev" width="388" height="280" aria-label="Prévia do cenário"></canvas>
+    ${outer ? genOptionsHTML(o, num) : `<div class="ggrid">
       ${num("gW", "Largura", o.w, 16, 160, "casas")}${num("gH", "Altura", o.h, 12, 160, "casas")}
       ${cave ? "" : num("gRooms", "Salas", o.rooms, 2, 40) + `<label class="gnum"><span>Corredor</span><select id="gCw">${[[0, "Variado (1–3)"], [1, "1 casa"], [2, "2 casas"], [3, "3 casas"]].map(([k, l]) => `<option value="${k}" ${+o.cw === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>` + num("gGap", "Espaço entre salas", o.gap ?? 5, 2, 12, "casas") + num("gMin", "Sala mín.", o.rmin, 2, 12) + num("gMax", "Sala máx.", o.rmax, 3, 20) + num("gDoors", "Portas", o.doors, 0, 100, "%") + num("gSecret", "Passagens secretas", o.secret, 0, 6) + num("gDead", "Becos sem saída", o.dead, 0, 12)}
       ${num("gTraps", "Armadilhas escondidas", o.traps, 0, 20)}
     </div>
     <label for="gDeco">Decoração</label><select id="gDeco">${[["none", "Nenhuma"], ["few", "Pouca"], ["normal", "Normal"], ["lots", "Muita"]].map(([k, l]) => `<option value="${k}" ${o.deco === k ? "selected" : ""}>${l}</option>`).join("")}</select>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="gTorch" ${o.torches ? "checked" : ""}> ${cave ? "Cristais e fogueiras que iluminam" : "Tochas nas paredes (iluminam)"}</label>
-    <label class="chk"><input type="checkbox" id="gDark" ${o.dark ? "checked" : ""}> Começar no escuro (só vê quem tem luz)</label>
-    <div class="two" style="align-items:end"><label>Semente <input type="number" id="gSeed" value="${o.seed}"></label><button class="btn" id="gNew" title="Outra masmorra com as mesmas opções">🎲 Gerar outra</button></div>
+    `}
+    <label class="chk"><input type="checkbox" id="gDark" ${o.dark ? "checked" : ""}> ${outer ? "É noite (escuro: só vê quem tem luz)" : "Começar no escuro (só vê quem tem luz)"}</label>
+    <div class="two" style="align-items:end"><label>Semente <input type="number" id="gSeed" value="${o.seed}"></label><button class="btn" id="gNew" title="Outro cenário com as mesmas opções">🎲 Gerar outro</button></div>
     <p class="hint" id="gInfo"></p>
     <div class="acts foot"><span class="spacer"></span><button class="btn primary" id="gUse">Usar no mapa</button></div>
-    <p class="hint">Troca a imagem, as paredes e os objetos do mapa atual (os personagens vão para a escada de entrada). Ctrl+Z desfaz. Para guardar o mapa atual, salve antes em <b>Mapas</b>. Armadilhas ficam ocultas: só você vê.</p></div>`;
+    <p class="hint">Troca a imagem, as paredes e os objetos do mapa atual (os personagens vão para a entrada). Ctrl+Z desfaz. Para guardar o mapa atual, salve antes em <b>Mapas</b>.${outer ? "" : " Armadilhas ficam ocultas: só você vê."}</p></div>`;
   $("#pClose").onclick = closePanel;
   const read = () => {
     const v = (id, d) => { const e = $("#" + id); return e ? (+e.value || d) : d; };
-    Object.assign(genOpt, {w: v("gW", o.w), h: v("gH", o.h), rooms: v("gRooms", o.rooms), cw: $("#gCw") ? +$("#gCw").value : o.cw, gap: v("gGap", o.gap ?? 5), rmin: v("gMin", o.rmin), rmax: v("gMax", o.rmax), doors: $("#gDoors") ? +$("#gDoors").value : o.doors, secret: $("#gSecret") ? +$("#gSecret").value : o.secret, dead: $("#gDead") ? +$("#gDead").value : o.dead, traps: +$("#gTraps").value || 0, deco: $("#gDeco").value, torches: $("#gTorch").checked, dark: $("#gDark").checked, seed: +$("#gSeed").value || 1});
+    Object.assign(genOpt, {w: v("gW", o.w), h: v("gH", o.h), rooms: v("gRooms", o.rooms), cw: $("#gCw") ? +$("#gCw").value : o.cw, gap: v("gGap", o.gap ?? 5), rmin: v("gMin", o.rmin), rmax: v("gMax", o.rmax), doors: $("#gDoors") ? +$("#gDoors").value : o.doors, secret: $("#gSecret") ? +$("#gSecret").value : o.secret, dead: $("#gDead") ? +$("#gDead").value : o.dead, traps: $("#gTraps") ? +$("#gTraps").value || 0 : o.traps, deco: $("#gDeco") ? $("#gDeco").value : o.deco, torches: $("#gTorch") ? $("#gTorch").checked : o.torches, dark: $("#gDark").checked, seed: +$("#gSeed").value || 1});
+    const sv = (id, k, f = x => x) => { const e = $("#" + id); if (e) genOpt[k] = e.type === "checkbox" ? e.checked : f(e.value); };
+    sv("gDens", "dens"); sv("gSeason", "season"); sv("gClear", "clear"); sv("gPond", "pond"); sv("gAnimals", "animals"); sv("gTreeBlk", "treeBlk"); sv("gHouses", "houses", Number); sv("gMarket", "market"); sv("gFields", "fields"); sv("gIkind", "ikind"); sv("gGraves", "graves"); sv("gMauso", "mauso");
     saveGenOpt(); clearTimeout(genT); genT = setTimeout(runGen, 120);
   };
   $("#panel").querySelectorAll("input,select").forEach(e => e.onchange = read);
-  $("#gStyle").onclick = e => { const b = e.target.closest("[data-st]"); if (!b) return; genOpt.style = b.dataset.st; saveGenOpt(); openGenPanel(); };
+  $("#gStyle").onclick = e => { const b = e.target.closest("[data-st]"); if (!b) return; genOpt.style = b.dataset.st; genOpt.dark = GEN_DARK[genOpt.style]; saveGenOpt(); openGenPanel(); };
   $("#gNew").onclick = () => { $("#gSeed").value = 1 + Math.floor(Math.random() * 99999); read(); };
-  $("#gUse").onclick = () => { if (!genRes) return; if ((scene.bg || walls().length || tokens.some(isProp)) && !confirm("Trocar o mapa atual pela masmorra? (Ctrl+Z desfaz)")) return; applyGen(genRes, genOpt); closePanel(); toast("Masmorra pronta!"); };
+  $("#gUse").onclick = () => { if (!genRes) return; if ((scene.bg || walls().length || tokens.some(isProp)) && !confirm("Trocar o mapa atual por este cenário? (Ctrl+Z desfaz)")) return; applyGen(genRes, genOpt); closePanel(); toast("Cenário pronto!"); };
   runGen();
 }
 function runGen(){
@@ -1181,7 +1187,7 @@ function runGen(){
   if (!ASSETS.length) { $("#gInfo").textContent = "Carregando os assets…"; setTimeout(runGen, 400); return; }
   genRes = genMap({...genOpt});
   const S = Math.min(c.width / genRes.w, c.height / genRes.h), x = c.getContext("2d");
-  const g = {w: genRes.w, h: genRes.h, t: genRes.t, style: genRes.style}, img = renderGen(g, Math.max(4, S * 2));
+  const g = {w: genRes.w, h: genRes.h, t: genRes.t, style: genRes.style, iw: genRes.iw}, img = renderGen(g, Math.max(4, S * 2));
   x.fillStyle = "#0d0b09"; x.fillRect(0, 0, c.width, c.height);
   const ox = (c.width - genRes.w * S) / 2, oy = (c.height - genRes.h * S) / 2;
   x.drawImage(img, ox, oy, genRes.w * S, genRes.h * S);
@@ -1194,7 +1200,230 @@ function runGen(){
   x.lineWidth = 2; for (const d of genRes.doors) { x.strokeStyle = d[4] ? "#c07ae8" : "#d8a050"; x.beginPath(); x.moveTo(ox + d[0] * S, oy + d[1] * S); x.lineTo(ox + d[2] * S, oy + d[3] * S); x.stroke(); }
   if (waiting) setTimeout(() => { if ($("#genPrev")) runGen(); }, 350);
   const nD = genRes.doors.filter(d => !d[4]).length, nS = genRes.doors.length - nD;
-  $("#gInfo").innerHTML = genRes.style === "cave" ? `Caverna ${genRes.w}×${genRes.h} · ${genRes.props.length} objetos` : `${genRes.rooms.length} salas · ${nD} portas${nS ? ` · ${nS} secreta${nS > 1 ? "s" : ""} <span style="color:#c07ae8">(roxas)</span>` : ""} · ${genRes.props.length} objetos`;
+  const SN = {forest: "Floresta", village: genRes.w * genRes.h > 2600 ? "Cidade" : "Vila", interior: "Construção", cemetery: "Cemitério"};
+  $("#gInfo").innerHTML = SN[genRes.style] ? `${SN[genRes.style]} ${genRes.w}×${genRes.h} · ${genRes.props.length} objetos${genRes.rooms.length ? ` · ${genRes.rooms.length} cômodo${genRes.rooms.length > 1 ? "s" : ""}` : ""}` : genRes.style === "cave" ? `Caverna ${genRes.w}×${genRes.h} · ${genRes.props.length} objetos` : `${genRes.rooms.length} salas · ${nD} portas${nS ? ` · ${nS} secreta${nS > 1 ? "s" : ""} <span style="color:#c07ae8">(roxas)</span>` : ""} · ${genRes.props.length} objetos`;
+}
+
+// ---------- outros cenários: floresta, vila, casa/taverna, cemitério ----------
+// códigos do chão: 3 grama · 4 terra · 5 água · 6 madeira · 7 pedra (calçamento) · 8 mata fechada · 9 terra de plantio
+const OUT_STYLES = new Set(["forest", "village", "interior", "cemetery"]);
+const GEN_STYLES = [["dungeon", "🏰 Masmorra"], ["cave", "⛰ Caverna"], ["forest", "🌲 Floresta"], ["village", "🏘 Vila"], ["interior", "🏠 Casa / Taverna"], ["cemetery", "⚰️ Cemitério"], ["rolled", "🎲 Rolada"]];
+const GEN_DARK = {dungeon: true, cave: true, cemetery: true, rolled: true, forest: false, village: false, interior: false};
+const styleTabs = cur => `<div class="seg gstyles" id="gStyle">${GEN_STYLES.map(([k, l]) => `<button data-st="${k}" aria-pressed="${cur === k}">${l}</button>`).join("")}</div>`;
+function genScenery(o){
+  const R = rng(o.seed), ri = (a, b) => a + Math.floor(R() * (b - a + 1)), pick = a => a[Math.floor(R() * a.length)];
+  const st = o.style;
+  let W = Math.max(20, Math.min(160, o.w | 0)), H = Math.max(16, Math.min(160, o.h | 0));
+  const IK = {taverna: [18, 13], casa: [11, 8], mansao: [24, 17], loja: [12, 9]};
+  if (st === "interior") { const [bw, bh] = IK[o.ikind] || IK.taverna; W = bw + 8; H = bh + 9; }
+  const T = new Uint8Array(W * H).fill(st === "cemetery" ? 8 : 3), occ = new Uint8Array(W * H), props = [], walls = [], doors = [], rooms = [];
+  const inb = (x, y) => x >= 0 && y >= 0 && x < W && y < H, at = (x, y) => inb(x, y) ? T[y * W + x] : 0, set = (x, y, v) => { if (inb(x, y)) T[y * W + x] = v; };
+  const A = id => ASSETS.find(a => a.id === id);
+  const fits = (x, y, w, h, ok) => { for (let b = y; b < y + h; b++) for (let a = x; a < x + w; a++) { if (!inb(a, b) || occ[b * W + a] || (ok && !ok(a, b))) return false; } return true; };
+  const put = (id, x, y, rot = 0, extra = {}) => { const a = A(id); if (!a) return false; const sw = rot % 180 ? a.h : a.w, sh = rot % 180 ? a.w : a.h; for (let b = y; b < y + sh; b++) for (let c = x; c < x + sw; c++) if (inb(c, b)) occ[b * W + c] = 1; props.push({id, cx: x + sw / 2, cy: y + sh / 2, a: rot, ...extra}); return true; };
+  const tryPut = (id, ok, box = [0, 0, W, H], tries = 40, rots, extra) => { const a = A(id); if (!a) return false; for (let k = 0; k < tries; k++) { const rot = rots ? pick(rots) : a.w === a.h ? pick([0, 90, 180, 270]) : pick([0, 90, 180, 270]); const sw = rot % 180 ? a.h : a.w, sh = rot % 180 ? a.w : a.h, x = ri(box[0], box[2] - sw), y = ri(box[1], box[3] - sh); if (x < box[0] || y < box[1]) continue; if (fits(x, y, sw, sh, ok)) return put(id, x, y, rot, extra); } return false; };
+  const noise = (sc, seed) => { const gw = Math.ceil(W / sc) + 2, gh = Math.ceil(H / sc) + 2, G2 = []; const r2 = rng(o.seed + seed); for (let i = 0; i < gw * gh; i++) G2.push(r2()); return (x, y) => { const fx = x / sc, fy = y / sc, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0, g = (a, b) => G2[b * gw + a], s = t => t * t * (3 - 2 * t); const a = g(x0, y0) + (g(x0 + 1, y0) - g(x0, y0)) * s(tx), b = g(x0, y0 + 1) + (g(x0 + 1, y0 + 1) - g(x0, y0 + 1)) * s(tx); return a + (b - a) * s(ty); }; };
+  const nearT = (x, y, v, r) => { for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) if (at(x + a, y + b) === v) return true; return false; };
+  const path = (x0, y0, dx, dy, wid, v, wig = 1.2) => { // caminho que serpenteia até a borda
+    let x = x0, y = y0, drift = 0; const out = [];
+    for (let k = 0; k < 400 && inb(x, y); k++) {
+      for (let j = 0; j < wid; j++) set(x + (dy ? j : 0), y + (dx ? j : 0), v); out.push([x, y]);
+      x += dx; y += dy; drift += (R() - .5) * wig; drift *= .85;
+      if (Math.abs(drift) > .7) { const s = Math.sign(drift); if (dx) y += s; else x += s; drift = 0; for (let j = 0; j < wid; j++) set(x + (dy ? j : 0), y + (dx ? j : 0), v); }
+    }
+    return out;
+  };
+  const blob = (cx, cy, r, v) => { const n = noise(3, 77 + cx); for (let y = cy - r - 2; y <= cy + r + 2; y++) for (let x = cx - r - 2; x <= cx + r + 2; x++) if (Math.hypot(x - cx, y - cy) <= r * (.75 + n(x, y) * .5)) set(x, y, v); };
+  const grass = (x, y) => at(x, y) === 3 || at(x, y) === 8;
+  const U = G().unit || 1;
+  let start = [1, H >> 1];
+  // ---- paredes de uma construção com cômodos (casa, taverna, mausoléu) ----
+  const building = (bx, by, bw, bh, kind, frontDoor = true) => {
+    for (let y = by; y < by + bh; y++) for (let x = bx; x < bx + bw; x++) set(x, y, 6);
+    const rs = [{x: bx, y: by, w: bw, h: bh}], parts = [], minR = kind === "mausoleu" ? 99 : kind === "casa" || kind === "loja" ? 4 : 5;
+    for (let guard = 0; guard < 20; guard++) {
+      rs.sort((a, b) => b.w * b.h - a.w * a.h); const r = rs[0];
+      if (rs.length >= ({taverna: 6, casa: 4, mansao: 9, loja: 3, mausoleu: 1}[kind] || 4) || Math.max(r.w, r.h) < minR * 2) break;
+      rs.shift(); const vert = r.w > r.h ? true : r.h > r.w ? false : R() < .5;
+      const big = kind === "taverna" && parts.length === 0 ? .62 : .4 + R() * .2;
+      if (vert) { const cx = r.x + Math.max(minR, Math.min(r.w - minR, Math.round(r.w * big))); rs.push({x: r.x, y: r.y, w: cx - r.x, h: r.h}, {x: cx, y: r.y, w: r.x + r.w - cx, h: r.h}); parts.push({v: 1, at: cx, a: r.y, b: r.y + r.h}); }
+      else { const cy = r.y + Math.max(minR, Math.min(r.h - minR, Math.round(r.h * big))); rs.push({x: r.x, y: r.y, w: r.w, h: cy - r.y}, {x: r.x, y: cy, w: r.w, h: r.y + r.h - cy}); parts.push({v: 0, at: cy, a: r.x, b: r.x + r.w}); }
+    }
+    // paredes internas com uma porta cada
+    for (const p of parts) { const dpos = ri(p.a + 1, p.b - 2); for (let k = p.a; k < p.b; k++) { const s = p.v ? [p.at, k, p.at, k + 1] : [k, p.at, k + 1, p.at]; if (k === dpos) doors.push([...s, 0]); else walls.push(s); } }
+    // perímetro com porta da frente (embaixo)
+    const fx = ri(bx + 2, bx + bw - 3);
+    for (let x = bx; x < bx + bw; x++) { walls.push([x, by, x + 1, by]); if (frontDoor && x === fx) doors.push([x, by + bh, x + 1, by + bh, 0]); else walls.push([x, by + bh, x + 1, by + bh]); }
+    for (let y = by; y < by + bh; y++) { walls.push([bx, y, bx, y + 1]); walls.push([bx + bw, y, bx + bw, y + 1]); }
+    // nada encosta nas portas
+    for (const d of doors) { const hz = d[1] === d[3]; for (const [x, y] of hz ? [[d[0], d[1] - 1], [d[0], d[1]]] : [[d[0] - 1, d[1]], [d[0], d[1]]]) if (inb(x, y)) occ[y * W + x] = 1; }
+    rs.sort((a, b) => b.w * b.h - a.w * a.h);
+    return {rs, front: [fx, by + bh]};
+  };
+  const furnish = (r, type, deco) => { // mobília por tipo de cômodo
+    const inR = (x, y) => x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h, box = [r.x, r.y, r.x + r.w, r.y + r.h];
+    const wallPut = id => { const a = A(id); if (!a) return; for (let k = 0; k < 30; k++) { const side = ri(0, 3), rot = [0, 90, 180, 270][side], sw = rot % 180 ? a.h : a.w, sh = rot % 180 ? a.w : a.h;
+      const x = side === 0 || side === 2 ? ri(r.x, r.x + r.w - sw) : side === 1 ? r.x + r.w - sw : r.x, y = side === 1 || side === 3 ? ri(r.y, r.y + r.h - sh) : side === 0 ? r.y : r.y + r.h - sh;
+      if (fits(x, y, sw, sh, inR)) { put(id, x, y, rot); return; } } };
+    const L = {
+      salao: {wall: ["balcao", "lareira", "barris-pilha", "prateleira"], mid: ["mesa-redonda", "mesa-redonda", "mesa-redonda", "mesa", "banquinho", "banquinho", "banquinho", "banquinho", "banco"]},
+      sala: {wall: ["lareira", "estante", "armario"], mid: ["mesa", "cadeira", "cadeira", "tapete-redondo", "banquinho"]},
+      jantar: {wall: ["armario", "lareira"], mid: ["mesa", "cadeira", "cadeira", "cadeira", "cadeira", "candelabro"]},
+      cozinha: {wall: ["prateleira", "lareira", "bancada"], mid: ["caldeirao", "mesa", "barril", "sacos", "balde", "lenha"]},
+      quarto: {wall: [pick(["cama", "cama-casal", "beliche"]), "armario", "bau"], mid: ["tapete-redondo", "banquinho", "velas"]},
+      deposito: {wall: ["prateleira", "barris-pilha"], mid: ["caixas", "caixa", "barril", "sacos", "saco", "pilha-caixotes", "feno"]},
+      biblioteca: {wall: ["estante", "estante", "estante"], mid: ["escrivaninha", "cadeira", "livros", "pergaminho", "candelabro"]},
+      escritorio: {wall: ["estante", "bau"], mid: ["escrivaninha", "cadeira", "mapa-mesa", "tapete"]},
+      capela: {wall: ["altar", "estatua"], mid: ["banco", "banco", "velas", "candelabro"]},
+      loja: {wall: ["balcao", "prateleira", "prateleira", "armas"], mid: ["barril", "caixas", "sacos", "escudo"]},
+      mausoleu: {wall: ["estatua"], mid: ["sarcofago", "velas", "velas", "ossos"]},
+    }[type] || {wall: [], mid: []};
+    for (const id of L.wall) wallPut(id);
+    const n = Math.round(L.mid.length * ({none: 0, few: .45, normal: .8, lots: 1.3}[deco] ?? .8));
+    for (let i = 0; i < n; i++) tryPut(L.mid[i % L.mid.length], inR, box, 40);
+    if (o.torches && type !== "salao" && type !== "capela" && r.w * r.h > 12) tryPut("candelabro", inR, box, 30);
+  };
+  if (st === "forest") {
+    const nz = noise(6, 3); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (nz(x, y) > .55) set(x, y, 8);
+    const y0 = ri(Math.round(H * .3), Math.round(H * .7)), main = path(0, y0, 1, 0, 2, 4, 1.4); start = [0, y0];
+    if (R() < .7) { const [bx] = main[ri(Math.round(main.length * .3), Math.round(main.length * .7))]; path(bx, main.find(p => p[0] === bx)[1], 0, R() < .5 ? -1 : 1, 2, 4, 1.4); }
+    if (o.pond) { for (let k = 0; k < 40; k++) { const cx = ri(6, W - 7), cy = ri(5, H - 6); if (!nearT(cx, cy, 4, 6)) { blob(cx, cy, ri(3, 5), 5); break; } } }
+    // clareira
+    let clr = null;
+    if (o.clear !== "none") for (let k = 0; k < 60; k++) { const cx = ri(7, W - 8), cy = ri(6, H - 7); if (!nearT(cx, cy, 5, 5) && nearT(cx, cy, 4, 8) && !nearT(cx, cy, 4, 2)) { clr = [cx, cy]; for (let y = cy - 4; y <= cy + 4; y++) for (let x = cx - 4; x <= cx + 4; x++) if (Math.hypot(x - cx, y - cy) <= 4.3 && at(x, y) !== 4) set(x, y, 3); break; } }
+    if (clr) {
+      const [cx, cy] = clr, near = (x, y) => Math.hypot(x - cx, y - cy) <= 4.3, box = [cx - 4, cy - 4, cx + 5, cy + 5];
+      if (o.clear === "camp") { put("fogueira", cx, cy); tryPut("tenda", near, box); tryPut("tenda-azul", near, box); tryPut("saco-dormir", near, box); tryPut("saco-dormir", near, box); tryPut("lenha", near, box); tryPut("mochila", near, box); tryPut("panela-fogo", near, box); }
+      else { tryPut("ruina", near, box, 60); tryPut("pilar-quebrado", near, box); tryPut("pilar-quebrado", near, box); tryPut("estatua", near, box); tryPut("escombros", near, box); tryPut("circulo-ritual", near, box, 20); }
+      for (let y = cy - 5; y <= cy + 5; y++) for (let x = cx - 5; x <= cx + 5; x++) if (inb(x, y) && Math.hypot(x - cx, y - cy) <= 5) occ[y * W + x] = 1;
+    }
+    // bloqueia a água e o caminho para árvores
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (at(x, y) === 5 || at(x, y) === 4) occ[y * W + x] = 1;
+    const trees = {verao: ["arvore", "arvore", "arvore", "pinheiro", "pinheiro", "arvore-grande", "arvore-frutas"], outono: ["arvore-outono", "arvore-outono", "arvore-outono", "pinheiro", "arvore", "arvore-grande"], sombria: ["arvore-sombria", "arvore-sombria", "arvore-morta", "pinheiro", "arvore-morta"]}[o.season] || ["arvore", "pinheiro"];
+    const dens = {few: .035, normal: .06, dense: .095}[o.dens] ?? .06;
+    const cells = []; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) cells.push([x, y]);
+    for (const [x, y] of cells.sort(() => R() - .5)) {
+      const dk = at(x, y) === 8 ? 1.7 : 1;
+      if (R() < dens * dk) { const id = pick(trees), a = A(id); if (a && fits(x, y, a.w, a.h, (p, q) => !nearT(p, q, 4, 0))) put(id, x, y, pick([0, 90, 180, 270]), o.treeBlk ? {} : {noblk: 1}); }
+      else if (R() < .05) { const id = pick(["arbusto", "moita", "moita", "flores", "pedra", "toco", "cogumelos", "galhos", "pedra-musgo", "rochas", "tronco"]), a = A(id); if (a && fits(x, y, a.w, a.h)) put(id, x, y, pick([0, 90, 180, 270])); }
+    }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (at(x, y) === 5 && R() < .06 && !occ[y * W + x]) put("nenufares", x, y, 0);
+    if (o.animals) for (const id of ["cervo", "corvo", "coruja", pick(["lobo", "javali", "urso", "cervo"])]) tryPut(id, grass, [0, 0, W, H], 60);
+  }
+  else if (st === "village") {
+    const big = W * H > 2600, road = big ? 7 : 4, cy = ri(Math.round(H * .4), Math.round(H * .6));
+    path(0, cy - 1, 1, 0, 3, road, .3); start = [0, cy];
+    const cx = ri(Math.round(W * .35), Math.round(W * .65)); path(cx, 0, 0, 1, 2, road, .5);
+    if (big) path(ri(Math.round(W * .7), W - 8), cy, 0, R() < .5 ? -1 : 1, 2, road, .5);
+    // praça
+    for (let y = cy - 5; y <= cy + 5; y++) for (let x = cx - 5; x <= cx + 6; x++) set(x, y, 7);
+    put(big ? "fonte" : "poco", big ? cx - 1 : cx, big ? cy - 1 : cy);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (at(x, y) === 4 || at(x, y) === 7) occ[y * W + x] = 1;
+    const plaza = (x, y) => x >= cx - 5 && x <= cx + 6 && y >= cy - 5 && y <= cy + 5;
+    for (let y = cy - 5; y <= cy + 5; y++) for (let x = cx - 5; x <= cx + 6; x++) if (inb(x, y) && !(Math.abs(x - cx) < 2 && Math.abs(y - cy) < 2)) occ[y * W + x] = 0;
+    if (o.market) for (let i = 0; i < 4; i++) tryPut(pick(["barraca", "barraca-azul"]), plaza, [cx - 5, cy - 5, cx + 7, cy + 6], 30, [0]);
+    tryPut("carrinho-mao", plaza, [cx - 5, cy - 5, cx + 7, cy + 6]); tryPut("barris-pilha", plaza, [cx - 5, cy - 5, cx + 7, cy + 6]); tryPut("banco-praca", plaza, [cx - 5, cy - 5, cx + 7, cy + 6], 30, [0, 90]);
+    for (let y = cy - 5; y <= cy + 5; y++) for (let x = cx - 5; x <= cx + 6; x++) if (inb(x, y)) occ[y * W + x] = 1;
+    // casas ao longo das ruas (1 casa de distância da rua)
+    const houseIds = ["casa", "casa", "casa-palha", "casa-palha", "casa-madeira", "casa-grande"], special = ["igreja", "estabulo", "moinho"];
+    let placed = 0; const wantHouses = o.houses | 0;
+    const roadNear = (x, y, w, h) => { for (let b = y - 2; b < y + h + 2; b++) for (let a = x - 2; a < x + w + 2; a++) if (at(a, b) === road || at(a, b) === 7) return true; return false; };
+    const roadTouch = (x, y, w, h) => { for (let b = y - 1; b < y + h + 1; b++) for (let a = x - 1; a < x + w + 1; a++) if (at(a, b) === road || at(a, b) === 7) return true; return false; };
+    for (const id of special.concat(Array(60).fill(0).map(() => pick(houseIds)))) {
+      if (placed >= wantHouses + special.length) break;
+      const a = A(id); if (!a) continue;
+      for (let k = 0; k < 80; k++) { const rot = pick([0, 90]), sw = rot ? a.h : a.w, sh = rot ? a.w : a.h, x = ri(1, W - sw - 1), y = ri(1, H - sh - 1);
+        if (fits(x - 1, y - 1, sw + 2, sh + 2) && roadNear(x, y, sw, sh) && !roadTouch(x, y, sw, sh)) { put(id, x, y, rot); placed++;
+          // quintal
+          const yard = [x - 2, y - 2, x + sw + 2, y + sh + 2];
+          if (id === "estabulo") { tryPut("cavalo", grass, yard, 30); tryPut("cavalo-selado", grass, yard, 30); tryPut("feno", grass, yard); tryPut("cocho", grass, yard); }
+          else if (R() < .7) tryPut(pick(["barril", "caixa", "vasos-flor", "feno", "lenha", "carroca", "cerca", "sacos", "arvore-frutas"]), grass, yard, 20);
+          break; } }
+    }
+    const fr = [cx + 7, cy - 1, cx + 12, cy + 4]; tryPut("forja", grass, fr, 30); tryPut("bigorna", grass, fr);
+    if (o.fields) for (let f = 0; f < (big ? 3 : 2); f++) { for (let k = 0; k < 60; k++) { const fw = ri(3, 4) * 2, fh = ri(2, 3) * 2, x = ri(1, W - fw - 1), y = ri(1, H - fh - 1);
+      if (fits(x - 1, y - 1, fw + 2, fh + 2, (p, q) => at(p, q) === 3)) { for (let b = y; b < y + fh; b++) for (let a = x; a < x + fw; a++) set(a, b, 9); const crop = pick(["plantacao", "trigo"]); for (let b = y; b < y + fh; b += 2) for (let a = x; a < x + fw; a += 2) put(crop, a, b); for (let a = x; a < x + fw; a += 2) { if (fits(a, y - 1, 2, 1)) put("cerca", a, y - 1); if (fits(a, y + fh, 2, 1)) put("cerca", a, y + fh); } break; } } }
+    for (const id of ["vaca", "porco", "galinha", "galinha", "ovelha", "cachorro", "gato"]) if (R() < .7) tryPut(id, grass, [0, 0, W, H], 40);
+    for (let i = 0; i < W * H / 90; i++) tryPut(pick(["arvore", "arvore", "pinheiro", "arbusto", "arvore-frutas", "flores", "pedra"]), grass, [0, 0, W, H], 10, undefined, {noblk: 1});
+    tryPut("poste", (x, y) => at(x, y) === 3, [cx - 7, cy - 7, cx + 9, cy + 8], 40);
+  }
+  else if (st === "interior") {
+    const [bw, bh] = IK[o.ikind] || IK.taverna, bx = 4, by = 3, kind = o.ikind || "taverna";
+    const B = building(bx, by, bw, bh, kind);
+    const types = {taverna: ["salao", "cozinha", "deposito", "quarto", "quarto", "quarto"], casa: ["sala", "cozinha", "quarto", "quarto"], mansao: ["sala", "jantar", "biblioteca", "cozinha", "quarto", "quarto", "escritorio", "capela", "deposito"], loja: ["loja", "deposito", "quarto"]}[kind] || ["sala"];
+    B.rs.forEach((r, i) => { const ty = types[Math.min(i, types.length - 1)]; rooms.push({...r, type: ty}); furnish(r, ty, o.deco); });
+    // caminho da porta até a borda de baixo
+    const [fx, fy] = B.front; for (let y = fy; y < H; y++) { set(fx, y, 4); set(fx + 1, y, 4); } start = [fx, H - 2];
+    const out = (x, y) => at(x, y) === 3; for (let i = 0; i < (W * H) / 45; i++) tryPut(pick(["arvore", "arbusto", "flores", "barril", "pedra", "moita"]), out, [0, 0, W, H], 10, undefined, {noblk: 1});
+    tryPut("poste", (x, y) => out(x, y) && Math.abs(x - fx) < 3, [fx - 3, fy, fx + 4, fy + 3], 30); if (kind === "taverna") { tryPut("cocho", out, [0, fy, W, H]); tryPut("carroca", out, [0, fy, W, H]); tryPut("cavalo", out, [0, fy, W, H]); }
+  }
+  else if (st === "cemetery") {
+    const cx = W >> 1, cy = H >> 1;
+    for (let x = 1; x < W - 1; x++) { set(x, cy, 4); set(x, cy + 1, 4); } for (let y = 1; y < H - 1; y++) { set(cx, y, 4); set(cx + 1, y, 4); } start = [cx, H - 2];
+    for (let y = cy + 1; y < H; y++) { set(cx, y, 4); set(cx + 1, y, 4); }
+    // cerca em volta com portão embaixo
+    for (let x = 0; x < W - 1; x += 2) { if (fits(x, 0, 2, 1)) put("muro-madeira", x, 0); if (!(x >= cx - 1 && x <= cx + 1) && fits(x, H - 1, 2, 1)) put("muro-madeira", x, H - 1, 180); }
+    for (let y = 1; y < H - 2; y += 2) { if (fits(0, y, 1, 2)) put("muro-madeira", 0, y, 270); if (fits(W - 1, y, 1, 2)) put("muro-madeira", W - 1, y, 90); }
+    tryPut("poste", () => true, [cx - 3, H - 3, cx - 1, H - 1], 10); tryPut("poste", () => true, [cx + 2, H - 3, cx + 4, H - 1], 10);
+    if (o.mauso) { const q = [[3, 3], [W - 11, 3], [3, H - 10], [W - 11, H - 10]][ri(0, 3)], B = building(q[0], q[1], 7, 5, "mausoleu"); rooms.push({...B.rs[0], type: "mausoleu"}); furnish(B.rs[0], "mausoleu", "normal"); }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (at(x, y) === 4 || at(x, y) === 6) occ[y * W + x] = 1;
+    const gap = {few: 4, normal: 3, lots: 2}[o.graves] ?? 3;
+    for (let y = 3; y < H - 3; y += gap) for (let x = 3 + (y % 2); x < W - 3; x += 3) if (R() < .7 && fits(x, y, 1, 1, grass)) { const r0 = R(); put(r0 < .05 ? "buraco" : r0 < .065 ? "caixao" : "lapide", x, y, 0); if (R() < .08) tryPut(pick(["velas", "flores", "ossos", "sangue"]), grass, [x - 1, y, x + 2, y + 2], 6); }
+    for (let i = 0; i < W * H / 110; i++) tryPut(pick(["arvore-morta", "arvore-sombria", "arvore-morta"]), grass, [1, 1, W - 1, H - 1], 20, undefined, {noblk: 1});
+    for (const id of ["corvo", "corvo", "coruja", "gato"]) tryPut(id, grass, [1, 1, W - 1, H - 1], 30);
+    if (o.torches) for (let i = 0; i < 4; i++) tryPut("lanterna", grass, [1, 1, W - 1, H - 1], 30);
+  }
+  let t = ""; for (let i = 0; i < W * H; i++) t += T[i];
+  const dmerge = doors.map(d => d); // portas já são segmentos de 1 casa
+  return {w: W, h: H, t, style: st, walls: mergeSegs(walls), iw: walls, doors: dmerge, props, rooms, start, end: null};
+}
+function renderOutdoor(g, S, cvIn){
+  const W = g.w, H = g.h, cvx = cvIn || document.createElement("canvas"); cvx.width = Math.ceil(W * S); cvx.height = Math.ceil(H * S);
+  const x = cvx.getContext("2d"), at = (a, b) => a < 0 || b < 0 || a >= W || b >= H ? -1 : +g.t[b * W + a];
+  const COL = {3: [86, 116, 58], 8: [58, 84, 44], 4: [128, 102, 70], 5: [48, 104, 134], 6: [138, 104, 66], 7: [122, 117, 106], 9: [104, 78, 48]};
+  const base = COL[g.style === "cemetery" ? 8 : 3]; x.fillStyle = `rgb(${base})`; x.fillRect(0, 0, cvx.width, cvx.height);
+  for (const layer of [3, 8, 9, 4, 7, 5, 6]) for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) {
+    if (at(a, b) !== layer) continue; const h = hash2(a, b), k = .9 + h * .16, c = COL[layer].map(v => Math.round(v * k)).join(",");
+    x.fillStyle = `rgb(${c})`;
+    if (layer === 6) { x.fillRect(a * S, b * S, S, S); continue; }
+    x.beginPath(); x.arc((a + .5) * S, (b + .5) * S, S * (layer === 3 || layer === 8 ? .85 : .74), 0, Math.PI * 2); x.fill(); x.fillRect(a * S + S * .12, b * S + S * .12, S * .76, S * .76);
+  }
+  // detalhes
+  for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) {
+    const v = at(a, b), h = hash2(a, b, 5), px = a * S, py = b * S;
+    if (v === 3 || v === 8) { x.strokeStyle = v === 3 ? "rgba(140,180,90,.45)" : "rgba(100,130,70,.4)"; x.lineWidth = Math.max(1, S * .04); x.beginPath(); for (let i = 0; i < 3; i++) { const u = hash2(a, b, 20 + i), w2 = hash2(a, b, 30 + i); x.moveTo(px + u * S, py + w2 * S); x.lineTo(px + u * S + S * .05, py + w2 * S - S * .14); } x.stroke(); if (v === 8 && h < .3) { x.fillStyle = "rgba(120,90,40,.35)"; x.beginPath(); x.arc(px + hash2(a, b, 8) * S, py + hash2(a, b, 9) * S, S * .08, 0, 7); x.fill(); } }
+    else if (v === 4) { if (h < .4) { x.fillStyle = "rgba(80,60,40,.35)"; x.beginPath(); x.arc(px + hash2(a, b, 8) * S, py + hash2(a, b, 9) * S, S * .06, 0, 7); x.fill(); } }
+    else if (v === 5) { x.strokeStyle = "rgba(170,215,235,.35)"; x.lineWidth = Math.max(1, S * .04); if (h < .35) { x.beginPath(); x.arc(px + S * .5, py + S * .6, S * .25, Math.PI * 1.15, Math.PI * 1.85); x.stroke(); } }
+    else if (v === 6) { x.strokeStyle = "rgba(60,40,20,.45)"; x.lineWidth = Math.max(1, S * .03); x.beginPath(); for (const f of [.33, .66]) { x.moveTo(px, py + S * f); x.lineTo(px + S, py + S * f); } const off = (b % 2) * .5; x.moveTo(px + S * off, py); x.lineTo(px + S * off, py + S * .33); x.stroke(); }
+    else if (v === 7) { x.strokeStyle = "rgba(60,56,50,.5)"; x.lineWidth = Math.max(1, S * .035); for (const [u, w2, r] of [[.28, .28, .2], [.72, .3, .18], [.3, .72, .18], [.72, .72, .2]]) { x.beginPath(); x.arc(px + u * S, py + w2 * S, r * S, 0, 7); x.stroke(); } }
+    else if (v === 9) { x.strokeStyle = "rgba(60,40,20,.5)"; x.lineWidth = Math.max(1, S * .05); x.beginPath(); for (const f of [.25, .75]) { x.moveTo(px, py + S * f); x.lineTo(px + S, py + S * f); } x.stroke(); }
+  }
+  // margem da água
+  x.strokeStyle = "rgba(30,50,40,.5)"; x.lineWidth = Math.max(1, S * .06);
+  for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) if (at(a, b) === 5) for (const [dx, dy, s] of [[0, -1, [a, b, a + 1, b]], [0, 1, [a, b + 1, a + 1, b + 1]], [-1, 0, [a, b, a, b + 1]], [1, 0, [a + 1, b, a + 1, b + 1]]]) if (at(a + dx, b + dy) !== 5 && at(a + dx, b + dy) !== -1) { x.beginPath(); x.moveTo(s[0] * S, s[1] * S); x.lineTo(s[2] * S, s[3] * S); x.stroke(); }
+  // paredes das construções
+  const segs = g.iw || [];
+  if (segs.length) {
+    x.lineCap = "square";
+    x.beginPath(); for (const s of segs) { x.moveTo(s[0] * S, s[1] * S); x.lineTo(s[2] * S, s[3] * S); }
+    x.strokeStyle = "rgba(0,0,0,.35)"; x.lineWidth = S * .42; x.stroke();
+    x.strokeStyle = "#3a2c20"; x.lineWidth = S * .28; x.stroke(); x.strokeStyle = "#7a6048"; x.lineWidth = S * .09; x.stroke();
+  }
+  return cvx;
+}
+function genOptionsHTML(o, num){ // opções do painel para cada tipo de cenário
+  const sel = (id, label, opts, v) => `<label class="gnum"><span>${label}</span><select id="${id}">${opts.map(([k, l]) => `<option value="${k}" ${String(v) === String(k) ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
+  const chk = (id, label, v) => `<label class="chk"><input type="checkbox" id="${id}" ${v ? "checked" : ""}> ${label}</label>`;
+  const size = num("gW", "Largura", o.w, 20, 160, "casas") + num("gH", "Altura", o.h, 16, 160, "casas");
+  const deco = sel("gDeco", "Decoração", [["none", "Nenhuma"], ["few", "Pouca"], ["normal", "Normal"], ["lots", "Muita"]], o.deco);
+  switch (o.style) {
+    case "forest": return `<div class="ggrid">${size}${sel("gDens", "Árvores", [["few", "Poucas"], ["normal", "Normal"], ["dense", "Mata fechada"]], o.dens)}${sel("gSeason", "Estação", [["verao", "Verão"], ["outono", "Outono"], ["sombria", "Sombria"]], o.season)}${sel("gClear", "Clareira", [["none", "Nenhuma"], ["camp", "Acampamento"], ["ruins", "Ruínas"]], o.clear)}</div>
+      ${chk("gPond", "Lago", o.pond)}${chk("gAnimals", "Animais", o.animals)}${chk("gTreeBlk", "Árvores tapam a visão (mais pesado)", o.treeBlk)}`;
+    case "village": return `<div class="ggrid">${size}${num("gHouses", "Casas", o.houses, 2, 40)}</div>${chk("gMarket", "Feira na praça", o.market)}${chk("gFields", "Plantações", o.fields)}<p class="hint">Mapas grandes (mais de ~2600 casas) viram cidade, com ruas de pedra e fonte.</p>`;
+    case "interior": return `<div class="ggrid">${sel("gIkind", "Tipo", [["taverna", "Taverna"], ["casa", "Casa"], ["loja", "Loja / ferreiro"], ["mansao", "Mansão"]], o.ikind)}${deco}</div>${chk("gTorch", "Candelabros e lareiras (iluminam)", o.torches)}`;
+    case "cemetery": return `<div class="ggrid">${size}${sel("gGraves", "Túmulos", [["few", "Poucos"], ["normal", "Normal"], ["lots", "Muitos"]], o.graves)}</div>${chk("gMauso", "Mausoléu (com porta e sarcófago)", o.mauso)}${chk("gTorch", "Lanternas (iluminam)", o.torches)}`;
+  }
+  return null;
 }
 
 // ---------- masmorra rolada: vai sendo criada enquanto os jogadores exploram ----------
@@ -1458,8 +1687,8 @@ function openRollPanel(){
     <b>Saídas — 1d4</b><p>1 a 4 saídas (além da porta por onde entraram)</p>
     <b>Encontro — 1d20</b><table>${RT_ENC.map((r, i) => `<tr><td>${(i ? RT_ENC[i - 1][0] + 1 : 1)}${r[0] > (i ? RT_ENC[i - 1][0] + 1 : 1) ? "–" + r[0] : ""}</td><td>${r[1]}</td></tr>`).join("")}</table>
     <b>Tesouro — 1d20</b><table>${RT_TRE.map((r, i) => `<tr><td>${(i ? RT_TRE[i - 1][0] + 1 : 1)}${r[0] > (i ? RT_TRE[i - 1][0] + 1 : 1) ? "–" + r[0] : ""}</td><td>${r[1]}</td></tr>`).join("")}</table></details>`;
-  $("#panel").innerHTML = `<div class="panel gen-panel" role="dialog" aria-label="Masmorra rolada"><h3>Gerador de masmorras <button class="btn small" id="pClose">Fechar</button></h3>
-    <div class="seg" id="gStyle" style="margin:0 0 10px"><button data-st="dungeon">🏰 Masmorra</button><button data-st="cave">⛰ Caverna</button><button data-st="rolled" aria-pressed="true">🎲 Rolada</button></div>
+  $("#panel").innerHTML = `<div class="panel gen-panel" role="dialog" aria-label="Masmorra rolada"><h3>Gerador de cenários <button class="btn small" id="pClose">Fechar</button></h3>
+    ${styleTabs("rolled")}
     ${!R ? `<p class="hint" style="font-size:14px">A masmorra vai sendo criada <b>enquanto os jogadores exploram</b>. Você começa só com a entrada. Quando o grupo chega numa porta ou passagem ainda não rolada (o <b style="color:var(--brass)">?</b> dourado, só você vê), clique nela e role: o que existe na sala (1d20), o formato (1d12) e as saídas (1d4). Se sair inimigo ou tesouro, rola a tabela deles também. A sala aparece desenhada, com paredes, portas e objetos.</p>
       <label class="chk"><input type="checkbox" id="gTorch" ${genOpt.torches ? "checked" : ""}> Tochas nas paredes (iluminam)</label>
       <label class="chk"><input type="checkbox" id="gDark" ${genOpt.dark ? "checked" : ""}> Começar no escuro (só vê quem tem luz)</label>
@@ -1478,7 +1707,7 @@ function openRollPanel(){
       <div class="acts" style="margin-top:10px"><button class="btn small danger" id="rReset">Recomeçar do zero</button></div>`}
     ${tables}</div>`;
   $("#pClose").onclick = closePanel;
-  $("#gStyle").onclick = ev => { const b = ev.target.closest("[data-st]"); if (!b) return; genOpt.style = b.dataset.st; saveGenOpt(); openGenPanel(); };
+  $("#gStyle").onclick = ev => { const b = ev.target.closest("[data-st]"); if (!b) return; genOpt.style = b.dataset.st; genOpt.dark = GEN_DARK[genOpt.style]; saveGenOpt(); openGenPanel(); };
   const tg = $("#gTorch"); if (tg) tg.onchange = () => { genOpt.torches = tg.checked; saveGenOpt(); };
   const dk0 = $("#gDark"); if (dk0) dk0.onchange = () => { genOpt.dark = dk0.checked; saveGenOpt(); };
   if ($("#rStart")) $("#rStart").onclick = rollStart;
@@ -1603,6 +1832,55 @@ async function openMapsPanel(){
   P.ondrop = async e => { const f = e.target.closest("[data-fold]"); const id = +e.dataTransfer.getData("text/mesa-map"); P.querySelectorAll(".mfold.over").forEach(x => x.classList.remove("over")); if (!f || !id) return; e.preventDefault(); const k = f.dataset.fold, m = libList.find(x => x.id === id); if (!m || m.f === k) return; m.f = k; openMapsPanel(); await libPatch(id, l => ({...l, f: k})); refresh(); };
 }
 
+
+// ---------- arrastar e soltar no mapa: assets, magias, meus tokens e imagens do computador ----------
+let dragPayload = null, dropPrev = null;
+const DND_SEL = "[data-as],[data-my],[data-sp],[data-mt]";
+document.addEventListener("mousedown", e => { const el = e.target.closest?.(DND_SEL); if (el) el.draggable = true; }, true);
+document.addEventListener("dragstart", e => {
+  const el = e.target.closest?.(DND_SEL); if (!el) return;
+  const d = el.dataset;
+  dragPayload = d.as != null ? {k: "as", i: +d.as} : d.my != null ? {k: "my", i: +d.my} : d.sp != null ? {k: "sp", i: +d.sp} : {k: "mt", i: +d.mt};
+  e.dataTransfer.setData("text/mesa-drop", JSON.stringify(dragPayload)); e.dataTransfer.effectAllowed = "copy";
+  const im = el.querySelector("img"); if (im) e.dataTransfer.setDragImage(im, im.width / 2, im.height / 2);
+});
+document.addEventListener("dragend", () => { dragPayload = null; dropPrev = null; dirty = true; });
+function dropSpell(i, wx, wy){ const sp = SPELLS[i]; if (!sp) return; spellSel = i; spellCustom = null; return {id: uid(), t: "tpl", n: sp.n, ic: sp.ic, sh: sp.sh, r: sp.r, wd: sp.wd, c: sp.c, x: Math.round(wx), y: Math.round(wy), a: 0, own: isGM ? undefined : myKey}; }
+cv.addEventListener("dragover", e => {
+  const files = [...(e.dataTransfer?.types || [])].includes("Files");
+  if (!dragPayload && !(files && isGM)) return;
+  if (dragPayload && dragPayload.k !== "sp" && !isGM) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+  const [wx, wy] = toWorld(e.clientX, e.clientY); dropPrev = {x: wx, y: wy, p: dragPayload}; dirty = true;
+});
+cv.addEventListener("dragleave", () => { dropPrev = null; dirty = true; });
+cv.addEventListener("drop", async e => {
+  e.preventDefault(); const [wx, wy] = toWorld(e.clientX, e.clientY); lastClick = [wx, wy]; dropPrev = null; dirty = true;
+  const p = dragPayload; dragPayload = null;
+  if (!p) { // imagem arrastada do computador: vira um objeto no mapa (e entra em Meus assets)
+    if (!isGM) return; const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith("image/")); if (!f) return;
+    toast("Enviando a imagem…");
+    try { const url = await uploadImage(f, "assets"), [iw, ih] = await measure(url).catch(() => [100, 100]), n = f.name.replace(/\.\w+$/, "").slice(0, 24);
+      const w = Math.max(1, Math.min(8, Math.round(iw / 140))), h = Math.max(1, Math.min(8, Math.round(w * ih / iw)));
+      myAssets.push({n, src: url, w, h}); saveMyAssets(); addProp({n, w, h, blk: null}, url); toast(`“${n}” colocado no mapa e salvo em Meus assets.`);
+    } catch (err) { toast("Não enviei: " + err.message); }
+    return;
+  }
+  if (p.k === "sp") { const t = dropSpell(p.i, wx, wy); if (!t) return; if (isGM) { drawings.push(t); save("drawings"); } else { ptpls[t.id] = t; send("tpl", {op: "set", t}); } selTpl = t.id; drawTplBar(); if (flyKind === "spell") openFlyout("spell"); return; }
+  if (!isGM) return;
+  if (p.k === "as") addProp(ASSETS[p.i]);
+  else if (p.k === "my") { const a = myAssets[p.i]; if (a) addProp({n: a.n, w: a.w, h: a.h, blk: null}, a.src); }
+  else if (p.k === "mt") { const m = myTokens[p.i]; if (!m) return; const c = JSON.parse(JSON.stringify(m)); const [x, y] = snapPoint(wx, wy, c.s || 1); tokens.push({...c, id: uid(), x, y}); selTok = tokens[tokens.length - 1].id; save("tokens"); dirty = true; }
+});
+function paintDropPrev(){
+  const d = dropPrev; if (!d) return; const p = d.p;
+  ctx.save(); ctx.globalAlpha = .6;
+  if (!p) { const S = G().size; ctx.setLineDash([6 / cam.z, 4 / cam.z]); ctx.strokeStyle = "#ffe28a"; ctx.lineWidth = 2 / cam.z; ctx.strokeRect(d.x - S / 2, d.y - S / 2, S, S); ctx.setLineDash([]); ctx.restore(); label(d.x, d.y, "Soltar a imagem aqui"); return; }
+  if (p.k === "sp") { const t = dropSpell(p.i, d.x, d.y); if (t) paintTpl(t, true); }
+  else if (p.k === "mt") { const m = myTokens[p.i]; if (m) { const [x, y] = snapPoint(d.x, d.y, m.s || 1); ctx.beginPath(); ctx.arc(x, y, tokR(m), 0, Math.PI * 2); ctx.fillStyle = m.c || "#d0a54c"; ctx.fill(); } }
+  else { const a = p.k === "as" ? ASSETS[p.i] : myAssets[p.i]; if (a) { const t = {k: "prop", pw: a.w, ph: a.h, a: 0, sn: true, img: p.k === "as" ? `/assets/${a.path || a.id + ".svg"}` : a.src}; const [x, y] = snapProp(t, d.x, d.y); t.x = x; t.y = y; paintProp(t); const [W2, H2] = propSize(t); ctx.globalAlpha = 1; ctx.setLineDash([6 / cam.z, 4 / cam.z]); ctx.strokeStyle = "#ffe28a"; ctx.lineWidth = 2 / cam.z; ctx.strokeRect(x - W2 / 2, y - H2 / 2, W2, H2); ctx.setLineDash([]); } }
+  ctx.restore();
+}
 // ---------- pings (Alt + clique) ----------
 let pings = [];
 const nameColor = n => { let h = 0; for (const ch of String(n)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 75% 62%)`; };
@@ -2083,7 +2361,7 @@ function drawTools(){
   const btn = (t, icon, label, key) => `<button class="tool" data-tool="${t}" aria-pressed="${tool === t}" title="${label} (${key.toUpperCase()})" aria-label="${label}">${icon}<span class="k">${key.toUpperCase()}</span></button>`;
   $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r") + btn("spell", I.spell, "Áreas de magia", "m")
     + (isGM ? btn("draw", I.draw, "Desenhar e marcar áreas", "d") + btn("erase", I.erase, "Borracha (apaga desenhos)", "e") + btn("fog", I.fog, "Névoa de guerra", "f") + btn("wall", I.wall, "Paredes e portas (bloqueiam luz e visão)", "w")
-      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de masmorras" aria-label="Gerador de masmorras">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
+      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
   $("#tools").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.tool) setTool(b.dataset.tool);
@@ -2150,7 +2428,7 @@ function openFlyout(kind){
       <div class="lbl" style="margin-top:10px">Ajustar antes de colocar</div>
       <div class="two"><label>Tamanho (${esc(G().unitName)}) <input type="number" id="spR" min="1" step="1.5" value="${sp.r}"></label><label>Cor <input type="color" id="spC" value="${sp.c}"></label></div>
       <div class="seg" id="spSh" style="margin-top:6px">${[["circle", "Círculo"], ["cone", "Cone"], ["line", "Linha"], ["square", "Cubo"]].map(([k, l]) => `<button data-sh="${k}" aria-pressed="${sp.sh === k}">${l}</button>`).join("")}</div>
-      <p class="hint" style="margin-top:8px">Clique no mapa para colocar. Cone e linha: clique na origem e arraste para mirar. Depois, com Mover (V), arraste a área ou a bolinha branca (girar / tamanho). Delete remove.${isGM ? "" : " Todos veem a sua área enquanto ela existir."}</p></div>`;
+      <p class="hint" style="margin-top:8px"><b>Arraste uma magia para o mapa</b>, ou escolha e clique no mapa para colocar. Cone e linha: clique na origem e arraste para mirar. Depois, com Mover (V), arraste a área ou a bolinha branca (girar / tamanho). Delete remove.${isGM ? "" : " Todos veem a sua área enquanto ela existir."}</p></div>`;
     $("#spGrid").onclick = e => { const b = e.target.closest("[data-sp]"); if (b) { spellSel = +b.dataset.sp; spellCustom = null; openFlyout("spell"); } };
     const upd = () => { spellCustom = {...curSpell(), r: Math.max(1, parseFloat(String($("#spR").value).replace(",", ".")) || curSpell().r), c: $("#spC").value}; };
     $("#spR").oninput = upd; $("#spC").oninput = upd;
