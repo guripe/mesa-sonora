@@ -927,11 +927,6 @@ function paintWallsPlayer(c, own){ // c já com a transformação do mundo
 function paintDoors(c = ctx){ // portas bem marcadas (as secretas não aparecem para os jogadores)
   const th = Math.max(6 / cam.z, G().size * .2), lw = Math.max(1.5 / cam.z, G().size * .035);
   c.save();
-  if (!isGM || gmPreview) { // passagem secreta fechada: os jogadores veem uma parede de pedra comum no lugar (some quando o mestre abre)
-    const sw = walls().filter(w => w.d && w.s && !w.o && w.p);
-    if (sw.length) { const S = G().size; c.lineCap = "square"; c.beginPath(); for (const w of sw) { c.moveTo(w.p[0], w.p[1]); c.lineTo(w.p[2], w.p[3]); }
-      c.strokeStyle = "rgba(0,0,0,.45)"; c.lineWidth = S * .34; c.stroke(); c.strokeStyle = "#241e19"; c.lineWidth = S * .26; c.stroke(); c.strokeStyle = "#51483e"; c.lineWidth = S * .08; c.stroke(); c.lineCap = "butt"; }
-  }
   for (const w of walls()) {
     if (!w.d || w.s || !w.p) continue;
     const [x1, y1, x2, y2] = w.p, L = Math.hypot(x2 - x1, y2 - y1); if (!L) continue;
@@ -1191,6 +1186,7 @@ function renderGen(g, S, cvIn){
   for (let a = 0; a <= W; a++) for (let b = 0; b < H; b++) if (!!at(a - 1, b) !== !!at(a, b)) segs.push([a, b, a, b + 1, 0, at(a, b) ? 1 : -1]);
   if (g.nx?.length) { const nx = new Set(g.nx); for (let i = segs.length - 1; i >= 0; i--) if (nx.has(segs[i].slice(0, 4).join(","))) segs.splice(i, 1); }
   for (const s of g.iw || []) segs.push([s[0], s[1], s[2], s[3], 0, 0]);
+  for (const s of g.sw || []) { const v = s[0] === s[2]; segs.push([s[0], s[1], s[2], s[3], v ? 0 : 1, v ? 1 : 0], [s[0], s[1], s[2], s[3], v ? 0 : -1, v ? -1 : 0]); }  // passagem secreta fechada: parede igual às outras (só para os jogadores)
   x.lineCap = "square";
   x.strokeStyle = "rgba(0,0,0,.35)"; x.lineWidth = S * .3; x.beginPath(); for (const [x1, y1, x2, y2, ny, nx] of segs) { const o = S * .18; x.moveTo(x1 * S + nx * o, y1 * S + ny * o); x.lineTo(x2 * S + nx * o, y2 * S + ny * o); } x.stroke();
   x.beginPath(); for (const s of segs) { x.moveTo(s[0] * S, s[1] * S); x.lineTo(s[2] * S, s[3] * S); }
@@ -1198,8 +1194,10 @@ function renderGen(g, S, cvIn){
   return cvx;
 }
 function genCanvas(){
-  const g = scene.gen; if (!g || !g.t) return null;
-  const S = Math.max(8, Math.min(48, g.s || 48, 2800 / Math.max(g.w, g.h))), sig = [g.style, g.w, g.h, S, g.seed, g.ver || 0, JSON.stringify(g.iw || []), JSON.stringify(g.nx || [])].join("|");
+  const g0 = scene.gen; if (!g0 || !g0.t) return null;
+  const sw = (!isGM || gmPreview) && !OUT_STYLES.has(g0.style) ? walls().filter(w => w.d && w.s && !w.o && w.p).map(w => w.p.map((v, i) => Math.round((v - (i % 2 ? g0.y0 || 0 : g0.x0 || 0)) / g0.s * 2) / 2)) : [];
+  const g = sw.length ? {...g0, sw} : g0;
+  const S = Math.max(8, Math.min(48, g.s || 48, 2800 / Math.max(g.w, g.h))), sig = [g.style, g.w, g.h, S, g.seed, g.ver || 0, JSON.stringify(g.iw || []), JSON.stringify(g.nx || []), JSON.stringify(sw)].join("|");
   if (genCache.sig !== sig || genCache.t !== g.t) { genCache.sig = sig; genCache.t = g.t; genCache.cv = renderGen(g, S); }   // compara o desenho inteiro, não só o começo
   return genCache.cv;
 }
