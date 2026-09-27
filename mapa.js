@@ -36,6 +36,8 @@ I.door = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-widt
 const COLORS = ["#d0a54c", "#c0473a", "#4a72b8", "#5f9a4a", "#8a5bb0", "#e07b2e", "#e8e2d0", "#222222"];
 
 // ---------- estado ----------
+// modo edição: mapa.html?edit=ID abre um mapa salvo em outra aba; nada daqui chega aos jogadores
+const EDIT_ID = +new URLSearchParams(location.search).get("edit") || 0, ROW = EDIT_ID || 1;
 let sb = null, chan = null, isGM = false;
 let scene = {bg: null, bgW: 0, bgH: 0, grid: {type: "square", size: 70, ox: 0, oy: 0, color: "#000000", alpha: .35, show: true, unit: 1.5, unitName: "m"}};
 let tokens = [], fog = {on: false, cells: {}}, drawings = [];
@@ -1787,6 +1789,9 @@ async function libSaveAs(n, f){
 }
 async function libSaveCur(quiet){
   if (!scene.libId) return false;
+  if (scene.libAt) { const {data: r} = await sb.from("map_state").select("updated_at").eq("id", scene.libId).maybeSingle();
+    if (r?.updated_at && new Date(r.updated_at) > new Date(scene.libAt) && !confirm(`“${scene.libName}” foi editado em outra aba depois que você abriu na mesa.\n\nOK = salvar a versão da mesa por cima\nCancelar = manter a versão editada`)) { scene.libAt = r.updated_at; return false; } }
+  scene.libAt = new Date().toISOString();
   const {error, count} = await sb.from("map_state").update(libSnapshot(scene.libName || "Mapa", scene.libF), {count: "exact"}).eq("id", scene.libId);
   if (error) { toast("Não salvei: " + error.message); return false; }
   if (!count) { const n = scene.libName || "Mapa"; delete scene.libId; await libSaveAs(n, scene.libF); return true; }
@@ -1802,7 +1807,7 @@ async function libOpen(id){
     if (error || !data) return toast("Não abri: " + (error?.message || "mapa não encontrado"));
     const sc = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, roll: null, ...(data.scene || {})};
     sc.grid = {type: "square", size: 70, ox: 0, oy: 0, color: "#000000", alpha: .35, show: true, unit: 1.5, unitName: "m", ...(data.scene?.grid || {})};
-    sc.libId = id; sc.libName = data.scene?.lib?.n || m?.n || "Mapa"; sc.libF = data.scene?.lib?.f || ""; delete sc.lib;
+    sc.libId = id; sc.libName = data.scene?.lib?.n || m?.n || "Mapa"; sc.libF = data.scene?.lib?.f || ""; sc.libAt = data.updated_at || new Date().toISOString(); delete sc.lib;
     scene = sc; tokens = data.tokens || []; drawings = data.drawings || [];
     fog = {on: !!data.fog?.on, cells: data.fog?.cells || {}, exImg: data.fog?.exImg || null, exBox: data.fog?.exBox || null}; exC = null; exReady = false; exImgSrc = null;
     undoS.length = 0; redoS.length = 0; for (const c of ["scene", "tokens", "fog", "drawings"]) { snapPrev(c); lastSave[c] = Date.now(); }
@@ -1830,14 +1835,15 @@ async function openMapsPanel(){
   const row = m => `<div class="mrow ${m.id === scene.libId ? "on" : ""}" data-mid="${m.id}" draggable="true">
       <span class="mthumb">${m.bg ? `<img src="${esc(m.bg)}" alt="" loading="lazy">` : m.gs ? (m.gs === "cave" ? "⛰" : "🏰") : "▦"}</span>
       <span class="mname"><b>${esc(m.n)}</b><small>${m.id === scene.libId ? "aberto agora · " : ""}${when(m.at)}</small></span>
-      <button class="btn small primary" data-open="${m.id}" ${m.id === scene.libId ? "disabled" : ""}>Abrir</button>
+      ${EDIT_ID ? `<button class="btn small primary" data-editnow="${m.id}" ${m.id === EDIT_ID ? "disabled" : ""}>Editar</button>` : `<button class="btn small primary" data-open="${m.id}" ${m.id === scene.libId ? "disabled" : ""} title="Abrir na mesa (os jogadores vão para este mapa)">Abrir</button><button class="btn small ic" data-edittab="${m.id}" title="Editar em outra aba, sem tirar os jogadores do mapa atual" aria-label="Editar em outra aba">✏️</button>`}
       ${m.bg ? `<button class="btn small ic" data-mrel="${m.id}" title="Liberar a imagem deste mapa no diário dos jogadores" aria-label="Liberar para os jogadores">📤</button>` : ""}<button class="btn small ic" data-ren="${m.id}" title="Renomear" aria-label="Renomear">✎</button>
       <button class="btn small ic" data-dup="${m.id}" title="Duplicar" aria-label="Duplicar">⧉</button>
       <button class="btn small ic danger" data-del="${m.id}" title="Apagar" aria-label="Apagar">🗑</button></div>`;
   const groups = [["", "Sem pasta"], ...libFolders.map(f => [f, f])];
   $("#panel").innerHTML = `<div class="panel maps-panel" role="dialog" aria-label="Mapas salvos"><h3>Mapas <button class="btn small" id="pClose">Fechar</button></h3>
-    <div class="mcur">Aberto agora: <b>${esc(scene.libId ? scene.libName : "mapa sem nome")}</b>${scene.libId ? "" : " <small>(não salvo)</small>"}
-      <div class="acts" style="margin-top:8px">${scene.libId ? `<button class="btn small primary" id="mSave">💾 Salvar</button>` : ""}<button class="btn small ${scene.libId ? "" : "primary"}" id="mSaveAs">Salvar como novo…</button><button class="btn small" id="mBlank" title="Começar um mapa vazio">＋ Mapa vazio</button></div>
+    ${EDIT_ID ? `<div class="mcur">✏️ Editando <b>${esc(scene.lib?.n || "")}</b> nesta aba. Tudo é salvo sozinho e os jogadores não veem. Para usar na sessão, clique em <b>Abrir</b> na aba da mesa.</div>` : ""}
+    <div class="mcur" ${EDIT_ID ? "hidden" : ""}>Aberto agora: <b>${esc(scene.libId ? scene.libName : "mapa sem nome")}</b>${scene.libId ? "" : " <small>(não salvo)</small>"}
+      <div class="acts" style="margin-top:8px">${scene.libId ? `<button class="btn small primary" id="mSave">💾 Salvar</button>` : ""}<button class="btn small ${scene.libId ? "" : "primary"}" id="mSaveAs">Salvar como novo…</button><button class="btn small" id="mBlank" title="Começar um mapa vazio na mesa">＋ Mapa vazio</button><button class="btn small" id="mNewTab" title="Criar e montar um mapa em outra aba, sem mexer na mesa">✏️ Novo em outra aba</button></div>
       <form id="mForm" hidden><input type="text" id="mName" maxlength="40" placeholder="Nome do mapa" required><select id="mFolder">${groups.map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join("")}</select><button class="btn small primary">Salvar</button></form></div>
     <p class="hint">Monte os mapas antes da sessão e na hora é só abrir. Ao abrir outro, o que está aberto é salvo sozinho. Arraste um mapa para outra pasta.</p>
     <div class="acts"><button class="btn small" id="mNewF">＋ Nova pasta</button></div>
@@ -1856,12 +1862,22 @@ async function openMapsPanel(){
     scene = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, roll: null, libId: null, libName: null, libF: "", grid: {...scene.grid}}; tokens = chars.map(t => ({...t, tr: []})); drawings = []; fog = {on: false, cells: {}}; resetExplore();
     wallsVer++; losCache.clear(); save("scene"); save("tokens"); save("drawings"); save("fog", false); dirty = true; drawTop(); drawEmpty(); fit(); openMapsPanel();
   };
+  if ($("#mNewTab")) $("#mNewTab").onclick = async () => {
+    const n = (prompt("Nome do novo mapa:") || "").trim().slice(0, 40); if (!n) return;
+    const id = Math.max(LIB0 - 1, ...libList.map(m => m.id)) + 1, w = window.open("about:blank", "_blank");
+    const {error} = await sb.from("map_state").insert({id, scene: {bg: null, walls: [], light: "day", grid: {...scene.grid}, lib: {n, f: ""}}, tokens: [], fog: {on: false, cells: {}}, drawings: [], updated_at: new Date().toISOString()});
+    if (error) { w?.close(); return toast("Não criei: " + error.message); }
+    if (w) w.location.href = `/mapa.html?edit=${id}`; else window.open(`/mapa.html?edit=${id}`, "_blank");
+    await libLoad(); openMapsPanel();
+  };
   $("#mNewF").onclick = async () => { const n = (prompt("Nome da pasta:") || "").trim().slice(0, 30); if (!n) return; if (!libFolders.includes(n)) { libFolders.push(n); await libSaveFolders(); } openMapsPanel(); };
   const P = $("#panel");
   P.onclick = async e => {
     const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
     if (d.tog != null) { libClosed[d.tog] = !libClosed[d.tog]; saveLibClosed(); openMapsPanel(); }
     else if (d.open) libOpen(+d.open);
+    else if (d.edittab) window.open(`/mapa.html?edit=${d.edittab}`, "_blank");
+    else if (d.editnow) location.href = `/mapa.html?edit=${d.editnow}`;
     else if (d.mrel) { const m = libList.find(x => x.id === +d.mrel); if (!m?.bg) return; if (!hand) await handLoad(); if (hand.some(h => h.url === m.bg)) { hand.find(h => h.url === m.bg).vis = true; } else hand.push({id: uid(), cat: "mapa", t: m.n, body: "", url: m.bg, vis: true, at: Date.now()}); await handSave(); toast(`Imagem de “${m.n}” liberada em Mapas para os jogadores.`); }
     else if (d.ren) { const m = libList.find(x => x.id === +d.ren); const n = (prompt("Novo nome:", m.n) || "").trim().slice(0, 40); if (n) { await libPatch(m.id, l => ({...l, n})); refresh(); } }
     else if (d.dup) { const {data, error} = await sb.from("map_state").select("*").eq("id", +d.dup).maybeSingle(); if (error || !data) return toast("Não consegui duplicar."); const id = Math.max(LIB0 - 1, ...libList.map(m => m.id)) + 1; data.scene = {...(data.scene || {}), lib: {...(data.scene?.lib || {}), n: (data.scene?.lib?.n || "Mapa") + " (cópia)"}}; delete data.scene.libId; const {error: e2} = await sb.from("map_state").insert({...data, id, updated_at: new Date().toISOString()}); if (e2) toast("Não consegui duplicar: " + e2.message); refresh(); }
@@ -2126,8 +2142,8 @@ function paintTpl(tp, sel){
   const [cx, cy] = tplCenter(tp), gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, L);
   gr.addColorStop(0, tp.c + "88"); gr.addColorStop(1, tp.c + "22");
   ctx.globalAlpha = 1; ctx.fillStyle = gr; ctx.fill(); ctx.strokeStyle = tp.c; ctx.lineWidth = (sel ? 3.5 : 2.5) / cam.z; ctx.setLineDash(sel ? [8 / cam.z, 5 / cam.z] : []); ctx.stroke(); ctx.setLineDash([]);
-  const fs = Math.max(13 / cam.z, Math.min(L * .35, 34)); ctx.font = `${fs}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(tp.ic || "✨", cx, cy - fs * .15);
-  if (G().size * cam.z > 18) { ctx.font = `700 ${Math.max(11 / cam.z, fs * .38)}px "Alegreya Sans", sans-serif`; ctx.fillStyle = "#fff"; ctx.shadowColor = "#000"; ctx.shadowBlur = 4; ctx.fillText(`${tp.n} · ${String(tp.r).replace(".", ",")} ${G().unitName}`, cx, cy + fs * .7); ctx.shadowColor = "transparent"; }
+  const fs = Math.max(13 / cam.z, Math.min(L * .35, 34)); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  if (G().size * cam.z > 18) { ctx.font = `700 ${Math.max(11 / cam.z, fs * .38)}px "Alegreya Sans", sans-serif`; ctx.fillStyle = "#fff"; ctx.shadowColor = "#000"; ctx.shadowBlur = 4; ctx.fillText(`${tp.n} · ${String(tp.r).replace(".", ",")} ${G().unitName}`, cx, cy); ctx.shadowColor = "transparent"; }
   if (sel) { const [hx, hy] = tplHandle(tp); ctx.beginPath(); ctx.arc(hx, hy, 7 / cam.z, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill(); ctx.strokeStyle = "#000"; ctx.lineWidth = 1 / cam.z; ctx.stroke(); }
   ctx.restore();
 }
@@ -2285,6 +2301,10 @@ cv.addEventListener("pointerdown", e => {
     if (selTpl) { selTpl = null; drawTplBar(); } dirty = true;
     drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y, walk: walker ? {id: walker.id, c: cellAt(wx, wy)} : null}; cv.classList.add("panning"); return;
   }
+  if (tool === "spell") { // clicar numa área que já existe: pega e move (não cria outra)
+    const ct = curTpl(); if (ct && canEditTpl(ct)) { const [hx, hy] = tplHandle(ct.t); if (Math.hypot(wx - hx, wy - hy) <= 12 / cam.z) { drag = {kind: "tplrot", e: ct}; return; } }
+    const te = hitTpl(wx, wy); if (te) { selTpl = te.t.id; selTok = null; drag = {kind: "tplmove", e: te, dx: te.t.x - wx, dy: te.t.y - wy, moved: false}; dirty = true; drawTplBar(); return; }
+  }
   if (tool === "spell") { const sp = curSpell(); drag = {kind: "tplnew", t: {id: uid(), t: "tpl", n: sp.n, ic: sp.ic, sh: sp.sh, r: sp.r, wd: sp.wd, c: sp.c, x: Math.round(wx), y: Math.round(wy), a: 0, own: isGM ? undefined : myKey}}; dirty = true; return; }
   if (tool === "ruler") { const a = snapPoint(wx, wy); rulers[myKey] = {a, b: a}; drag = {kind: "ruler"}; dirty = true; sendRuler(); return; }
   if (!isGM) return;
@@ -2375,7 +2395,7 @@ function endPointer(e){
     return;
   }
   if (d.kind === "prop") { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); } dirty = true; return; }
-  if (d.kind === "tplnew") { const t = d.t; if (isGM) { drawings.push(t); save("drawings"); } else { ptpls[t.id] = t; send("tpl", {op: "set", t}); } selTpl = t.id; drawTplBar(); dirty = true; return; }
+  if (d.kind === "tplnew") { const t = d.t; if (isGM) { drawings.push(t); save("drawings"); } else { ptpls[t.id] = t; send("tpl", {op: "set", t}); } selTpl = t.id; setTool("move"); drawTplBar(); dirty = true; toast("Área colocada. Arraste para mover; a bolinha branca gira. Para outra, aperte M.", 2600); return; }
   if (d.kind === "tplmove" || d.kind === "tplrot") { if (d.moved) tplCommit(d.e); return; }
   if (d.kind === "propsize") { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); toast(`Tamanho: ${String(d.t.pw).replace(".", ",")} × ${String(d.t.ph).replace(".", ",")} casas`, 1400); } return; }
   if (d.kind === "rotate") {
@@ -2463,7 +2483,7 @@ function fogRect(p, q){
 
 // ---------- rede ----------
 let tokT = 0;
-function send(event, payload){ chan?.send({type: "broadcast", event, payload}); }
+function send(event, payload){ if (EDIT_ID) return; chan?.send({type: "broadcast", event, payload}); }
 function sendTok(t){ const now = performance.now(); if (now - tokT < 45) return; tokT = now; send("tok", {id: t.id, x: Math.round(t.x), y: Math.round(t.y), a: t.a || 0, live: 1}); }
 let rulerT = 0, rulerPending = null;
 function sendRuler(){
@@ -2504,13 +2524,13 @@ function save(col, undoable = true, delay){
   saveTimers[col] = setTimeout(async () => {
     const val = col === "scene" ? scene : col === "tokens" ? tokens : col === "fog" ? fog : drawings;
     lastSave[col] = Date.now();
-    const {error} = await sb.from("map_state").update({[col]: val, updated_at: new Date().toISOString()}).eq("id", 1);
+    const {error} = await sb.from("map_state").update({[col]: val, updated_at: new Date().toISOString()}).eq("id", ROW);
     if (error) return toast("Não salvei o mapa: " + error.message);
     try { if (JSON.stringify(val).length < 180000) send("state", {col, val}); } catch {}  // entrega na hora, sem depender só do banco
   }, delay || (col === "fog" ? 150 : 60));
 }
 async function load(){
-  const {data, error} = await sb.from("map_state").select("*").eq("id", 1).maybeSingle();
+  const {data, error} = await sb.from("map_state").select("*").eq("id", ROW).maybeSingle();
   if (error) { $("#gate").innerHTML = `O mapa ainda não foi ativado no banco.<br><small>${esc(error.message)}</small>`; $("#gate").hidden = false; return false; }
   apply(data || {});
   return true;
@@ -2549,7 +2569,7 @@ function drawTools(){
   };
 }
 function drawTop(){
-  $("#topbar").innerHTML = `<div class="title">${isGM && scene.libName ? esc(scene.libName) : "Mapa da mesa"}<small>${isGM ? "mestre" : esc(myNick || "jogador")}</small></div><span class="spacer"></span>
+  $("#topbar").innerHTML = `<div class="title">${EDIT_ID ? "✏️ " + esc(scene.lib?.n || "Mapa") : isGM && scene.libName ? esc(scene.libName) : "Mapa da mesa"}<small>${EDIT_ID ? "editando · jogadores não veem" : isGM ? "mestre" : esc(myNick || "jogador")}</small></div><span class="spacer"></span>
     ${isGM ? `<div class="seg light" id="lightSeg" title="Iluminação do mapa">${[["day", "☀ Dia"], ["dim", "🌗 Penumbra"], ["dark", "🌑 Escuro"]].map(([k, l]) => `<button data-light="${k}" aria-pressed="${(scene.light || "day") === k}">${l}</button>`).join("")}</div>
       <button class="btn" id="prevBtn" aria-pressed="${gmPreview}" title="Mostra por cima do mapa o que os jogadores enxergam">${I.eye} Ver como jogadores</button>` : ""}
     <button class="btn" id="trailBtn" aria-pressed="${showTrails}" title="Mostrar o rastro de todos os tokens">👣 Rastros</button>
@@ -3166,7 +3186,13 @@ async function boot(){
   $("#gate").hidden = true;
   fit();
   let reloadT = null;
-  sb.channel("mapa-db").on("postgres_changes", {event: "*", schema: "public", table: "map_state", filter: "id=eq.1"}, () => { clearTimeout(reloadT); reloadT = setTimeout(load, 80); }).subscribe();
+  sb.channel("mapa-db").on("postgres_changes", {event: "*", schema: "public", table: "map_state", filter: "id=eq." + ROW}, () => { clearTimeout(reloadT); reloadT = setTimeout(load, 80); }).subscribe();
+  if (EDIT_ID) { // editando em outra aba: não entra na sala dos jogadores
+    if (!isGM) { $("#gate").innerHTML = "Só o mestre pode editar mapas salvos."; $("#gate").hidden = false; return; }
+    document.title = "✏️ " + (scene.lib?.n || "Mapa") + " · editando";
+    $("#status").textContent = "modo edição · os jogadores não veem nada desta aba · tudo é salvo sozinho";
+    drawTop(); drawDiceBar(); drawDiceLog(); requestAnimationFrame(frame); return;
+  }
   chan = sb.channel("mapa", {config: {broadcast: {self: false}, presence: {key: myKey}}});
   chan.on("broadcast", {event: "tok"}, ({payload: p}) => {
     if (!p?.id) return;
