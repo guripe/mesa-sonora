@@ -502,8 +502,8 @@ function paintLighting(vs, alpha = 1){
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = true; ctx.drawImage(oc, 0, 0, cv.width, cv.height); ctx.restore();
   // paredes destacadas por cima da escuridão, só onde o jogador enxerga (ou já viu, mais apagadas)
   const [wc, wx] = off("WL", true); W(wx);
-  const hasW = paintWallsPlayer(wx); if (walls().some(w => w.d && !w.s)) { W(wx); paintDoors(wx); }
-  if (hasW || walls().some(w => w.d && !w.s)) {
+  const hasW = paintWallsPlayer(wx); if (walls().some(w => w.d)) { W(wx); paintDoors(wx); }
+  if (hasW || walls().some(w => w.d)) {
     const [mc, mx] = off("WM"), dpr = devicePixelRatio || 1, bl = Math.max(2, G().size * .12 * cam.z * dpr * LQ);
     if (exI && fog.exBox) { const [x0, y0, w, h] = fog.exBox; W(mx); mx.globalAlpha = .5; mx.drawImage(exI, x0, y0, w, h); mx.globalAlpha = 1; mx.setTransform(1, 0, 0, 1, 0, 0); }
     mx.filter = `blur(${bl}px)`; for (let k = 0; k < 3; k++) mx.drawImage(U, 0, 0); mx.filter = "none";
@@ -892,11 +892,15 @@ const nearDoor = (t, w) => { const [mx, my] = doorMid(w); return Math.hypot(t.x 
 // ---- cadeado das portas (só o mestre tranca e destranca) ----
 function doorPop(w){
   let el = $("#doorPop"); el?.remove(); el = document.createElement("div"); el.id = "doorPop"; el.className = "doorpop";
-  const draw = () => { el.innerHTML = `<button data-dl title="${w.lk ? "Destrancar" : "Trancar"}">${w.lk ? "🔒" : "🔓"}<small>${w.lk ? "Trancada" : "Destrancada"}</small></button>`; };
+  const draw = () => { el.innerHTML = `<button data-do ${w.lk ? "disabled" : ""} title="${w.o ? "Fechar a porta" : "Abrir a porta (os jogadores vão ver)"}">🚪<small>${w.o ? "Fechar" : "Abrir"}</small></button><button data-dl title="${w.lk ? "Destrancar" : "Trancar"}">${w.lk ? "🔒" : "🔓"}<small>${w.lk ? "Trancada" : "Destrancada"}</small></button>`; };
   draw(); document.body.appendChild(el); el.onpointerdown = e => e.stopPropagation();
   const place = () => { if (!el.isConnected) return; const [mx, my] = doorMid(w); el.style.left = (mx * cam.z + cam.x) + "px"; el.style.top = (my * cam.z + cam.y - 16) + "px"; };
   place(); el._place = place; doorPopW = w;
-  el.onclick = () => { w.lk = w.lk ? 0 : 1; if (w.lk && w.o) w.o = 0; wallsChanged(); draw(); toast(w.lk ? "🔒 Porta trancada: os jogadores não conseguem abrir." : "🔓 Porta destrancada.", 1800);
+  el.onclick = e => { const b = e.target.closest("button"); if (!b || b.disabled) return;
+    clearTimeout(doorPopT); doorPopT = setTimeout(() => el.remove(), 6000);
+    if (b.dataset.do != null) { w.o = w.o ? 0 : 1; wallsChanged(); draw(); toast(w.o ? "Porta aberta." : "Porta fechada.", 1400);
+      if (DS.init()) DS.click(DS.ctx.currentTime, 900, .3, .06, 3); return; }
+    w.lk = w.lk ? 0 : 1; if (w.lk && w.o) w.o = 0; wallsChanged(); draw(); toast(w.lk ? "🔒 Porta trancada: os jogadores não conseguem abrir." : "🔓 Porta destrancada.", 1800);
     if (DS.init()) { const t0 = DS.ctx.currentTime; DS.click(t0, 2400, .35, .04, 3); DS.click(t0 + .07, 1600, .3, .05, 3); } };
   clearTimeout(doorPopT); doorPopT = setTimeout(() => el.remove(), 6000);
 }
@@ -913,7 +917,8 @@ function paintWallsPlayer(c, own){ // c já com a transformação do mundo
   const ws = walls(); if (!ws.some(w => !w.d)) return false; c.save();
   const th = Math.max(3 / cam.z, G().size * .09);
   if (own) c.save(); c.lineCap = "round"; c.lineJoin = "round";
-  c.beginPath(); for (const w of ws) { if (w.d) continue; if (w.c) { c.moveTo(w.c[0] + w.r, w.c[1]); c.arc(w.c[0], w.c[1], w.r, 0, Math.PI * 2); } else if (w.p) { c.moveTo(w.p[0], w.p[1]); c.lineTo(w.p[2], w.p[3]); } }
+  c.beginPath(); for (const w of ws) { if (w.d && !(w.s && !w.o)) continue;  // passagem secreta fechada = parede para o jogador
+    if (w.c) { c.moveTo(w.c[0] + w.r, w.c[1]); c.arc(w.c[0], w.c[1], w.r, 0, Math.PI * 2); } else if (w.p) { c.moveTo(w.p[0], w.p[1]); c.lineTo(w.p[2], w.p[3]); } }
   c.strokeStyle = "rgba(0,0,0,.8)"; c.lineWidth = th + 4 / cam.z; c.stroke();
   c.strokeStyle = "#efe2c4"; c.lineWidth = th; c.stroke();
   if (own) c.restore(); c.restore(); return true;
@@ -922,6 +927,11 @@ function paintWallsPlayer(c, own){ // c já com a transformação do mundo
 function paintDoors(c = ctx){ // portas bem marcadas (as secretas não aparecem para os jogadores)
   const th = Math.max(6 / cam.z, G().size * .2), lw = Math.max(1.5 / cam.z, G().size * .035);
   c.save();
+  if (!isGM || gmPreview) { // passagem secreta fechada: os jogadores veem uma parede de pedra comum no lugar (some quando o mestre abre)
+    const sw = walls().filter(w => w.d && w.s && !w.o && w.p);
+    if (sw.length) { const S = G().size; c.lineCap = "square"; c.beginPath(); for (const w of sw) { c.moveTo(w.p[0], w.p[1]); c.lineTo(w.p[2], w.p[3]); }
+      c.strokeStyle = "rgba(0,0,0,.45)"; c.lineWidth = S * .34; c.stroke(); c.strokeStyle = "#241e19"; c.lineWidth = S * .26; c.stroke(); c.strokeStyle = "#51483e"; c.lineWidth = S * .08; c.stroke(); c.lineCap = "butt"; }
+  }
   for (const w of walls()) {
     if (!w.d || w.s || !w.p) continue;
     const [x1, y1, x2, y2] = w.p, L = Math.hypot(x2 - x1, y2 - y1); if (!L) continue;
@@ -2696,7 +2706,6 @@ cv.addEventListener("pointerdown", e => {
     const t = hitToken(wx, wy);
     if (isGM && scene.roll) { const rx = rollExitAt(wx, wy); if (rx) { rollSel = rx.id; genOpt.style = "rolled"; openRollPanel(); return; } }
     if (!t && isGM) { const wi = wallAt(wx, wy); const w = walls()[wi]; if (w?.d) {
-      if (w.lk) toast("🔒 Porta trancada. Clique no cadeado para destrancar.", 2200); else { w.o = w.o ? 0 : 1; wallsChanged(); toast(w.o ? "Porta aberta." : "Porta fechada.", 1400); }
       doorPop(w); return; } }
     if (!t && !isGM) { const w = doorAt(wx, wy); if (w && tokens.some(x => !isProp(x) && owns(x) && nearDoor(x, w))) { playerDoor(w); return; } }
     const sel = tokens.find(x => x.id === selTok);
