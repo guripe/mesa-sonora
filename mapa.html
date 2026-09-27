@@ -537,10 +537,7 @@ input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:tex
 .is-n{font:600 13px var(--body);color:var(--ink);text-shadow:0 1px 3px #000;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @keyframes isIn{from{opacity:0;transform:translateY(40px) scale(.6) rotate(-30deg)}to{opacity:1;transform:none}}
 @keyframes isPop{from{transform:scale(1.8);color:#ffd76a}to{transform:scale(1)}}
-.turnbar.intro .tb-p{animation:tbIn .5s cubic-bezier(.2,1.5,.4,1) both}
-@keyframes tbIn{from{opacity:0;transform:translateY(-70px) scale(.4) rotate(-12deg)}60%{opacity:1}to{opacity:1;transform:none}}
-.turnbar.intro .tb-p.on{animation-name:tbInOn}
-@keyframes tbInOn{from{opacity:0;transform:translateY(-70px) scale(.4)}to{opacity:1;transform:scale(1.14)}}
+
 /* barra de ferramentas: vira duas colunas quando a tela é baixa */
 .tools{display:grid;grid-auto-flow:column;grid-auto-columns:44px;gap:4px}
 .tools hr{display:none}
@@ -550,6 +547,47 @@ input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:tex
 
 .topbar{left:calc(var(--toolsW, 64px) + 10px)}
 .dlog{left:calc(var(--toolsW, 64px) + 12px)}
+
+/* entrada dramática do combate */
+.combatintro{position:fixed;inset:0;z-index:7;pointer-events:none;background:radial-gradient(ellipse at 50% 18%,rgba(120,20,10,.35),rgba(5,3,2,.78) 70%);animation:ciIn .6s ease-out both}
+.combatintro.out{opacity:0;transition:opacity .4s}
+.ci-banner{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:4px;animation:ciBan 1.6s cubic-bezier(.2,1.2,.3,1) both}
+.ci-banner b{font:700 64px/1 var(--display);color:#ffd76a;letter-spacing:.06em;text-transform:uppercase;text-shadow:0 0 30px rgba(255,120,40,.7),0 4px 0 #3a1a08,0 8px 24px #000}
+.ci-banner small{font:600 16px var(--body);color:var(--ink);letter-spacing:.3em;text-transform:uppercase;text-shadow:0 2px 6px #000}
+.ci-sw{font-size:48px;animation:ciSw 1.2s ease-out both}
+.ci-skip{position:absolute;right:20px;bottom:130px;pointer-events:auto;background:rgba(23,19,15,.92)!important}
+@keyframes ciIn{from{opacity:0}to{opacity:1}}
+@keyframes ciBan{0%{opacity:0;transform:translate(-50%,-50%) scale(2.4)}35%{opacity:1;transform:translate(-50%,-50%) scale(.95)}45%{transform:translate(-50%,-50%) scale(1.03)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes ciSw{0%{transform:scale(.3) rotate(-90deg);opacity:0}60%{transform:scale(1.3) rotate(10deg);opacity:1}100%{transform:none}}
+.turnbar.intro{z-index:9}
+.turnbar.intro .tb-p.pre{opacity:0;transform:translateY(-90px) scale(.3)}
+.turnbar.intro .tb-p.in{animation:tbIn .8s cubic-bezier(.18,1.6,.4,1) both}
+.turnbar.intro .tb-p.in .tb-img{animation:tbGlow 1.2s ease-out both}
+@keyframes tbIn{0%{opacity:0;transform:translateY(-110px) scale(.3) rotate(-18deg)}55%{opacity:1;transform:translateY(8px) scale(1.25) rotate(3deg)}100%{opacity:1;transform:none}}
+@keyframes tbGlow{0%{box-shadow:0 0 0 3px #ffd76a,0 0 40px 12px rgba(255,200,90,.9)}100%{box-shadow:0 6px 14px rgba(0,0,0,.6)}}
+.tb-ini{display:none}
+.turnbar.intro .tb-ini{display:block;position:absolute;top:-6px;right:-6px;min-width:22px;height:22px;padding:0 4px;border-radius:11px;background:#ffd76a;color:#1c150c;font:800 13px/22px var(--body);text-align:center;box-shadow:0 2px 6px #000}
+
+/* v22: edição das barrinhas em cima do token */
+.bared{position:fixed;z-index:12;min-width:340px;padding:8px 10px 10px;background:rgba(20,15,11,.96);border:1px solid #b8904e;border-radius:12px;box-shadow:0 14px 34px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:6px}
+.be-head{display:flex;align-items:center}.be-head b{font:700 16px var(--display);color:var(--brass)}
+.be-x{background:none;border:0;color:var(--ink2);font-size:15px;cursor:pointer;padding:2px 6px}.be-x:hover{color:#fff}
+.be-row{display:flex;align-items:center;gap:3px}
+.be-row > button{min-width:34px;height:30px;padding:0 5px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);font:700 12.5px var(--body);cursor:pointer}
+.be-row > button:hover{border-color:var(--brass);background:var(--card2)}
+.be-row > button[data-d^="-"]{color:#f0a090}.be-row > button[data-d]:not([data-d^="-"]){color:#9fe0a8}
+.be-bar{position:relative;flex:1;min-width:150px;height:30px;border-radius:7px;background:#120c08;border:1px solid rgba(0,0,0,.6);overflow:hidden;box-shadow:inset 0 0 6px rgba(0,0,0,.8)}
+.be-bar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(180deg,color-mix(in srgb,var(--bc) 75%,#fff 25%),var(--bc) 55%,color-mix(in srgb,var(--bc) 70%,#000));transition:width .25s}
+.be-bar span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:2px;font:700 14px var(--body);color:#fff;text-shadow:0 1px 2px #000,0 0 4px #000}
+.be-bar small{font-size:11px;opacity:.85;margin-right:4px}
+.be-bar input{width:42px;background:transparent;border:0;border-bottom:1px dashed rgba(255,255,255,.35);color:#fff;font:700 15px var(--body);text-align:center;text-shadow:0 1px 2px #000;padding:0}
+.be-bar input.bm{width:36px;opacity:.85;font-size:13px}.be-bar em{font-style:normal;opacity:.7}
+.be-bar input:focus{outline:none;border-bottom-color:#ffd76a;background:rgba(0,0,0,.35)}
+.be-del{min-width:26px!important;background:none!important;border:0!important;opacity:.5}.be-del:hover{opacity:1}
+.be-plus{align-self:center}
+.be-new{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding-top:4px;border-top:1px solid var(--line)}
+.be-new input{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 7px;font:inherit;width:120px}
+.be-cols{display:flex;gap:3px}.be-cols button{width:20px;height:20px;border-radius:50%;border:2px solid rgba(0,0,0,.4);cursor:pointer;padding:0}.be-cols button[aria-pressed="true"]{border-color:#ffd76a}
 </style>
 </head>
 <body>

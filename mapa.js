@@ -143,7 +143,7 @@ function selBar(){
     ${isGM && isProp(t) ? `<button class="btn small" data-sb="smaller" title="Diminuir (ou arraste um canto)" aria-label="Diminuir">－</button><span class="sbsize">${String(t.pw || 1).replace(".", ",")}×${String(t.ph || 1).replace(".", ",")}</span><button class="btn small" data-sb="bigger" title="Aumentar (ou arraste um canto)" aria-label="Aumentar">＋</button>` : ""}
     ${isGM && !isProp(t) && t.tr?.length ? `<button class="btn small" data-sb="back" title="Volta para onde estava antes do último movimento">↶ Voltar movimento</button><button class="btn small" data-sb="trail" title="Apagar o rastro deste token">🧹 Rastro</button>` : ""}
     ${isGM ? `<button class="btn small" data-sb="hide">${t.h ? "👁 Mostrar aos jogadores" : "🚫 Ocultar"}</button><button class="btn small danger" data-sb="del">Remover</button>` : ""}</div>
-    ${barUI ? `<div class="sbrow">${barUI}</div>` : ""}`;
+    `;
   const setHP = (i, v) => {
     const cur = tokens.find(x => x.id === selTok); if (!cur?.b?.[i]) return;
     v = Math.round(v); cur.b[i].v = v; dirty = true; selBarKey = "";
@@ -206,7 +206,7 @@ function frame(){
   requestAnimationFrame(frame);
 }
 function paint(){
-  refreshBlock();
+  refreshBlock(); barBtn = null;
   const d = devicePixelRatio || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#0d0b09"; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -280,6 +280,7 @@ function paint(){
   paintRollGM();
   paintPings();
   paintDropPrev();
+  if (barEdId) placeBarEd();
   if (drag?.kind === "propsize" && drag.at) label(drag.at[0], drag.at[1], `${String(drag.t.pw).replace(".", ",")} × ${String(drag.t.ph).replace(".", ",")} casas`);
   // réguas
   for (const k in rulers) paintRuler(rulers[k], k === myKey);
@@ -357,9 +358,12 @@ function paintToken(t){
   }
   // barrinhas
   const bars = (t.b || []).filter(b => b && b.v !== "" && b.v != null);
+  const canBar = selTok === t.id && !isProp(t) && (isGM || owns(t));
+  if (canBar && !(bars.length && (isGM || t.bv !== false || owns(t)))) { const s = 16 / cam.z; paintBarBtn(t, t.x + r * .55, t.y - r - s - 3 / cam.z, s); }
   if (bars.length && (isGM || t.bv !== false || owns(t))) {
     const bw = r * 2, bh = Math.max(3 / cam.z, r * .15), gap = bh * .45;
     let y = t.y - r - 5 / cam.z - bars.length * (bh + gap);
+    if (canBar) { const tot = bars.length * (bh + gap) - gap, s = Math.max(14 / cam.z, Math.min(22 / cam.z, tot)); paintBarBtn(t, t.x + bw / 2 + 4 / cam.z, y + tot / 2 - s / 2, s); }
     for (const b of bars) {
       const v = Number(b.v), m = Number(b.m);
       ctx.fillStyle = "rgba(10,8,6,.85)"; ctx.fillRect(t.x - bw / 2 - 1 / cam.z, y - 1 / cam.z, bw + 2 / cam.z, bh + 2 / cam.z);
@@ -2310,9 +2314,9 @@ let lastTurnKey = "";
 function drawTurnBar(){
   const I = scene.init; let el = $("#turnBar");
   if (!I?.on || !I.list?.length) { el?.remove(); lastTurnKey = ""; return; }
-  let intro = false;
-  if (!el) { el = document.createElement("div"); el.id = "turnBar"; el.className = "turnbar"; document.body.appendChild(el); intro = true; }
-  if (I.go && I.go !== el._go) { el._go = I.go; intro = intro || Date.now() - I.go < 20000; }
+  if (!el) { el = document.createElement("div"); el.id = "turnBar"; el.className = "turnbar"; document.body.appendChild(el); }
+  // a entrada animada só acontece quando o mestre clica em "Começar combate" (não ao abrir a página)
+  if (I.go && I.go !== tbIntro.go) { tbIntro.go = I.go; if (Date.now() - I.go < 15000) startIntro(); }
   const vis = I.list.map((e, i) => ({e, i})).filter(x => isGM || !x.e.hid), cur = I.list[I.cur];
   const curVis = isGM || !cur?.hid;
   el.innerHTML = `<div class="tb-round">Rodada <b>${I.round}</b></div>
@@ -2320,24 +2324,50 @@ function drawTurnBar(){
     <div class="tb-list">${vis.map(({e, i}) => { const t = iniTok(e), on = i === I.cur; return `<button class="tb-p ${on ? "on" : ""} ${iniMine(e) ? "mine" : ""} ${e.hid ? "hid" : ""} ${!t && e.tk ? "gone" : ""}" data-tb="${i}" style="--pc:${esc(t?.c || "#6b5a44")}" title="${esc(e.n)}${e.v != null ? " · iniciativa " + e.v : ""}">
         <span class="tb-img">${t?.img ? `<img src="${esc(t.img)}" alt="">` : `<span>${esc((e.n || "?").slice(0, 2).toUpperCase())}</span>`}</span>
         ${isGM || t?.o ? (t?.b?.[0] ? `<span class="tb-hp"><i style="width:${Math.max(0, Math.min(100, (+t.b[0].v || 0) / Math.max(1, +t.b[0].m || 1) * 100))}%"></i></span>` : "") : ""}
-        <span class="tb-n">${esc(e.n)}</span>${on ? `<span class="tb-arrow">▲</span>` : ""}</button>`; }).join("")}</div>
+        <span class="tb-n">${esc(e.n)}</span>${on ? `<span class="tb-arrow">▲</span>` : ""}${e.v != null ? `<span class="tb-ini">${e.v}</span>` : ""}</button>`; }).join("")}</div>
     ${isGM ? `<button class="tb-nav next" id="tbNext" title="Próximo turno">▶</button>` : cur && iniMine(cur) ? `<button class="btn small primary tb-end" id="tbEnd">✔ Terminar meu turno</button>` : ""}`;
-  if (intro) { // cada personagem entra na barra na ordem da iniciativa
-    el.classList.add("intro"); const ps = [...el.querySelectorAll(".tb-p")];
-    ps.forEach((p, k) => { p.style.animationDelay = (0.35 + k * 0.28) + "s"; setTimeout(() => { if (DS.init()) DS.tone(DS.ctx.currentTime, 330 + k * 55, .12, .08, "triangle"); }, 350 + k * 280); });
-    setTimeout(() => el.classList.remove("intro"), 900 + ps.length * 280);
-  }
+  if (tbIntro.active) { el.classList.add("intro"); el.querySelectorAll(".tb-p").forEach((p, k) => p.classList.add(k < tbIntro.shown ? "in" : "pre")); }
   if (isGM) { $("#tbPrev").onclick = () => iniGo(-1); $("#tbNext").onclick = () => iniGo(1); }
   const te = $("#tbEnd"); if (te) te.onclick = () => { send("endturn", {id: cur.id, who: myNick}); te.disabled = true; te.textContent = "…"; };
   el.querySelector(".tb-list").onclick = e => { const b = e.target.closest("[data-tb]"); if (!b) return; const t = iniTok(I.list[+b.dataset.tb]); if (t && (isGM || !t.h)) centerOn(t.x, t.y, Math.max(cam.z, .8)); if (isGM && e.detail === 2) openIniPanel(); };
   el.querySelector(".tb-list").ondblclick = () => { if (isGM) openIniPanel(); };
   // anúncio de troca de turno
   const key = I.round + ":" + (cur?.id || "");
-  if (key !== lastTurnKey) {
+  if (key !== lastTurnKey && !tbIntro.active) {
     const first = !lastTurnKey; lastTurnKey = key;
     if (cur && curVis && !first) turnAnnounce(cur);
     else if (cur && curVis && first && iniMine(cur)) turnAnnounce(cur);
   }
+}
+// ---- entrada dramática do combate (só depois de "Começar combate"; dá para pular) ----
+const tbIntro = {go: 0, active: false, shown: 0, timers: []};
+function startIntro(){
+  const I = scene.init; if (!I?.on) return;
+  tbIntro.timers.forEach(clearTimeout); tbIntro.timers = [];
+  Object.assign(tbIntro, {active: true, shown: 0});
+  const go = () => { // espera a tela da rolagem de iniciativa fechar
+    if ($("#iniStage")) { tbIntro.timers.push(setTimeout(go, 250)); return; }
+    let ov = $("#combatIntro"); ov?.remove(); ov = document.createElement("div"); ov.id = "combatIntro"; ov.className = "combatintro";
+    ov.innerHTML = `<div class="ci-banner"><span class="ci-sw">⚔️</span><b>Combate!</b><small>Ordem de iniciativa</small></div><button class="btn ci-skip" id="ciSkip">Pular animação ⏭</button>`;
+    document.body.appendChild(ov); $("#ciSkip").onclick = endIntro;
+    drawTurnBar();
+    if (DS.init()) { const t = DS.ctx.currentTime; DS.tone(t, 55, 1.4, .5, "sine", 35); DS.click(t, 180, .6, .5, .8); DS.drumroll(1.6); }
+    const n = document.querySelectorAll("#turnBar .tb-p").length, T0 = 1900, GAP = 850;
+    for (let k = 0; k < n; k++) tbIntro.timers.push(setTimeout(() => {
+      tbIntro.shown = k + 1; const p = document.querySelectorAll("#turnBar .tb-p")[k]; if (p) { p.classList.remove("pre"); p.classList.add("in"); }
+      if (DS.init()) { const t = DS.ctx.currentTime; DS.tone(t, 70 + k * 6, .35, .45, "sine", 40); DS.click(t, 240, .5, .12, 1); DS.tone(t + .02, 392 + k * 49, .4, .07, "triangle"); }
+    }, T0 + k * GAP));
+    tbIntro.timers.push(setTimeout(endIntro, T0 + n * GAP + 900));
+  };
+  go();
+}
+function endIntro(){
+  if (!tbIntro.active) return;
+  tbIntro.timers.forEach(clearTimeout); tbIntro.timers = []; tbIntro.active = false;
+  const ov = $("#combatIntro"); if (ov) { ov.classList.add("out"); setTimeout(() => ov.remove(), 400); }
+  const el = $("#turnBar"); el?.classList.remove("intro"); el?.querySelectorAll(".tb-p").forEach(p => p.classList.remove("pre", "in"));
+  lastTurnKey = ""; drawTurnBar();
+  const I = scene.init, cur = I?.list?.[I.cur]; if (cur && (isGM || !cur.hid)) turnAnnounce(cur);
 }
 function turnAnnounce(e){
   const mine = iniMine(e), b = document.createElement("div"); b.className = "turnann" + (mine ? " mine" : "");
@@ -2364,6 +2394,66 @@ function iniAskPrompt(list){ // jogador: rolar a iniciativa dos seus personagens
     const tk = tokens.find(t => owns(t) && (t.n || "") === b.dataset.n) || tokens.find(t => !isProp(t) && owns(t));
     const roll = {id: uid(), v: MAP_VER, who: b.dataset.n || myNick || "Jogador", label: "Iniciativa", ...r, secret: false, snd: null, col: tk?.c || "#d0a54c"}; send("roll", roll); addRoll(roll, true);
     send("inires", {id: b.dataset.ia, v: r.total, who: myNick}); b.remove(); if (!box.querySelector("[data-ia]")) box.remove(); };
+}
+
+// ---------- barrinhas: botão ✎ ao lado delas no mapa e edição grande em cima do token ----------
+let barBtn = null, barEdId = null, barAdd = false;
+const BAR_COLORS = ["#c0473a", "#3b6fc9", "#3fae4a", "#d0a54c", "#8a5bb0", "#e07b2e", "#4ab8b0", "#e8e2d0"];
+function barsOf(t){ return (t.b || []).filter(b => b && ((b.v !== "" && b.v != null) || (b.m !== "" && b.m != null))); }
+function barSave(t, whole){ // mestre salva; jogador pede ao mestre
+  dirty = true; selBarKey = "";
+  if (isGM) { save("tokens"); return; }
+  tokReq({id: t.id, bars: (t.b || []).map(b => ({n: b.n || "", v: b.v, m: b.m, c: b.c})), who: myNick});
+}
+function barSet(t, i, v){ const b = t.b?.[i]; if (!b) return; const m = +b.m; v = Math.round(v); if (m > 0) v = Math.max(-999, Math.min(v, m * 3)); b.v = v; barSave(t); drawBarEd(); }
+function openBarEd(t){ barEdId = t.id; barAdd = !barsOf(t).length; drawBarEd(); }
+function closeBarEd(){ barEdId = null; barAdd = false; $("#barEd")?.remove(); dirty = true; }
+function drawBarEd(){
+  const t = tokens.find(x => x.id === barEdId); if (!t || !(isGM || owns(t))) return closeBarEd();
+  let el = $("#barEd"); if (!el) { el = document.createElement("div"); el.id = "barEd"; el.className = "bared"; document.body.appendChild(el); el.onpointerdown = e => e.stopPropagation(); }
+  const list = (t.b || []).map((b, i) => ({...b, i})).filter(b => (b.v !== "" && b.v != null) || (b.m !== "" && b.m != null));
+  el.innerHTML = `<div class="be-head"><b>${esc(t.n || "Token")}</b><span class="spacer"></span><button class="be-x" data-be="close" title="Fechar (Esc)">✕</button></div>
+    ${list.map(b => { const v = +b.v || 0, m = +b.m, pct = m > 0 ? Math.max(0, Math.min(100, v / m * 100)) : 100; return `<div class="be-row">
+      <button data-bd="${b.i}" data-d="-10">−10</button><button data-bd="${b.i}" data-d="-5">−5</button><button data-bd="${b.i}" data-d="-1">−1</button>
+      <div class="be-bar" style="--bc:${esc(b.c || "#c0473a")}"><i style="width:${pct}%"></i><span>${b.n ? `<small>${esc(b.n)}</small> ` : ""}<input data-bv="${b.i}" value="${esc(b.v ?? "")}" inputmode="numeric" aria-label="Valor">${m > 0 || b.m === 0 ? `<em>/</em><input data-bm="${b.i}" value="${esc(b.m)}" inputmode="numeric" aria-label="Máximo" class="bm">` : ""}</span></div>
+      <button data-bd="${b.i}" data-d="1">+1</button><button data-bd="${b.i}" data-d="5">+5</button><button data-bd="${b.i}" data-d="10">+10</button>
+      <button class="be-del" data-bdel="${b.i}" title="Apagar esta barrinha">🗑</button></div>`; }).join("")}
+    ${barAdd ? `<div class="be-new"><input id="beN" maxlength="16" placeholder="Nome (ex.: Mana)"><input id="beM" inputmode="numeric" placeholder="Máximo" style="width:70px">
+        <div class="be-cols">${BAR_COLORS.map((c, k) => `<button data-bc="${c}" style="background:${c}" aria-pressed="${k === (list.length % BAR_COLORS.length)}"></button>`).join("")}</div>
+        <button class="btn small primary" data-be="add">Criar</button>${list.length ? `<button class="btn small" data-be="cancel">Cancelar</button>` : ""}</div>`
+      : `<button class="btn small be-plus" data-be="new">＋ Nova barrinha</button>`}`;
+  let pickCol = BAR_COLORS[list.length % BAR_COLORS.length];
+  el.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return; const d = b.dataset, cur = tokens.find(x => x.id === barEdId); if (!cur) return;
+    if (d.bd != null) barSet(cur, +d.bd, (+cur.b[+d.bd].v || 0) + +d.d);
+    else if (d.bdel != null) { if (confirm("Apagar esta barrinha?")) { cur.b.splice(+d.bdel, 1); barSave(cur); drawBarEd(); } }
+    else if (d.bc) { pickCol = d.bc; el.querySelectorAll("[data-bc]").forEach(x => x.setAttribute("aria-pressed", x === b)); }
+    else if (d.be === "close") closeBarEd();
+    else if (d.be === "new") { barAdd = true; drawBarEd(); setTimeout(() => $("#beN")?.focus(), 20); }
+    else if (d.be === "cancel") { barAdd = false; drawBarEd(); }
+    else if (d.be === "add") { const m = Math.max(0, Math.round(+$("#beM").value || 0)); cur.b = (cur.b || []).filter(x => x && ((x.v !== "" && x.v != null) || (x.m !== "" && x.m != null))); if (cur.b.length >= 8) return toast("Máximo de 8 barrinhas.");
+      cur.b.push({n: $("#beN").value.trim().slice(0, 16), v: m || 0, m: m || "", c: pickCol}); barAdd = false; barSave(cur); drawBarEd(); }
+  };
+  el.querySelectorAll("input").forEach(inp => {
+    inp.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { if (inp.id === "beN" || inp.id === "beM") el.querySelector('[data-be="add"]')?.click(); else inp.blur(); } if (e.key === "Escape") closeBarEd(); };
+    if (inp.dataset.bv != null || inp.dataset.bm != null) inp.onchange = () => { const cur = tokens.find(x => x.id === barEdId); if (!cur) return; const i = +(inp.dataset.bv ?? inp.dataset.bm), raw = inp.value.trim().replace(",", ".");
+      if (inp.dataset.bv != null) { const old = +cur.b[i].v || 0, v = /^[+-]/.test(raw) ? old + (+raw) : +raw; if (raw !== "" && isFinite(v)) barSet(cur, i, v); }
+      else { const m = Math.max(0, Math.round(+raw || 0)); cur.b[i].m = m || ""; barSave(cur); drawBarEd(); } };
+    inp.onfocus = () => inp.select();
+  });
+  placeBarEd();
+}
+function placeBarEd(){ // acompanha o token quando a câmera mexe
+  const el = $("#barEd"); if (!el) return; const t = (curTs || tokens).find(x => x.id === barEdId); if (!t) return;
+  const sx = t.x * cam.z + cam.x, sy = (t.y - tokR(t)) * cam.z + cam.y - 10, w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(innerWidth - w - 8, sx - w / 2)) + "px";
+  el.style.top = Math.max(60, Math.min(innerHeight - h - 120, sy - h)) + "px";
+}
+function paintBarBtn(t, x, y, s){ // botãozinho ✎ ao lado das barrinhas do token selecionado
+  ctx.save(); ctx.fillStyle = barEdId === t.id ? "#ffd76a" : "rgba(23,19,15,.92)"; ctx.strokeStyle = "#ffd76a"; ctx.lineWidth = 1.5 / cam.z;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, s, s, 3 / cam.z) : ctx.rect(x, y, s, s); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = barEdId === t.id ? "#1c150c" : "#ffd76a"; ctx.font = `700 ${s * .72}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(barsOf(t).length ? "✎" : "+", x + s / 2, y + s / 2 + s * .04);
+  ctx.restore(); barBtn = {id: t.id, x, y, s};
 }
 
 // ---------- pings (Alt + clique) ----------
@@ -2584,6 +2674,8 @@ cv.addEventListener("pointerdown", e => {
   if (e.button === 0) lastClick = [wx, wy];
   if (e.button === 2 && tool === "wall" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (e.button === 1 || e.button === 2 || spaceDown) { drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return; }
+  if (barBtn && e.button === 0) { const q = 3 / cam.z; if (wx >= barBtn.x - q && wx <= barBtn.x + barBtn.s + q && wy >= barBtn.y - q && wy <= barBtn.y + barBtn.s + q) { const bt = tokens.find(x => x.id === barBtn.id); if (bt) barEdId === bt.id ? closeBarEd() : openBarEd(bt); dirty = true; return; } }
+  if (barEdId && hitToken(wx, wy)?.id !== barEdId) closeBarEd();
   if (tool === "move") {
     const t = hitToken(wx, wy);
     if (isGM && scene.roll) { const rx = rollExitAt(wx, wy); if (rx) { rollSel = rx.id; genOpt.style = "rolled"; openRollPanel(); return; } }
@@ -2746,6 +2838,7 @@ addEventListener("keydown", e => {
   if (k === "enter" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (k === "escape" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (k === "escape" && diceModal) { closeDiceModal(); return; }
+  if (k === "escape" && barEdId) { closeBarEd(); return; }
   if (k === "escape" && selTok) { selTok = null; hoverCell = null; dirty = true; return; }
   if (k === "escape") { if (rulers[myKey]) { delete rulers[myKey]; sendRuler(); dirty = true; } closePanel(); closeFlyout(); selTok = null; return; }
   if (k === "+" || k === "=") return zoomAt(1.2);
@@ -3593,6 +3686,7 @@ async function boot(){
     }
     if (p.a != null) t.a = ((+p.a % 360) + 360) % 360;
     if (p.bi != null && t.b?.[p.bi] && isFinite(+p.bv)) t.b[p.bi].v = Math.round(+p.bv);
+    if (Array.isArray(p.bars)) t.b = p.bars.slice(0, 8).map(b => ({n: String(b?.n || "").slice(0, 16), v: isFinite(+b?.v) ? Math.round(+b.v) : "", m: isFinite(+b?.m) && +b.m > 0 ? Math.round(+b.m) : "", c: /^#[0-9a-f]{6}$/i.test(b?.c || "") ? b.c : "#c0473a"}));
     delete tokLive[t.id]; send("tok", {id: t.id, x: t.x, y: t.y, a: t.a, q: p.q}); save("tokens", true, 600); dirty = true;
   });
   chan.on("presence", {event: "sync"}, () => {
