@@ -3256,7 +3256,9 @@ function nextStage(){
   document.body.appendChild(st);
   const els = [...st.querySelectorAll(".ds-slot .die")], order = r.dice.map((x, i) => i);
   // o d20 que vale fica por último, para o suspense
-  const key = r.dice.findIndex(x => x.d === 20 && !x.x); if (key >= 0) { order.splice(order.indexOf(key), 1); order.push(key); }
+  const d20i = r.dice.map((x, i) => i).filter(i => r.dice[i].d === 20 && !r.dice[i].x), pickV = v => d20i.find(i => r.dice[i].v === v);
+  const key = pickV(20) ?? pickV(1) ?? (d20i.length ? d20i[0] : -1);   // o dado que decidiu o crítico/falha é o que ganha a animação
+  if (key >= 0) { order.splice(order.indexOf(key), 1); order.push(key); }
   const roll = fast ? 700 : 1500, gap = fast ? 90 : 220, susp = hasD20 && !fast ? 900 : 0;
   const landAt = {}; order.forEach((i, k) => { landAt[i] = roll + k * gap + (i === key ? susp : 0); });
   let endAt = Math.max(...Object.values(landAt)) + 60;
