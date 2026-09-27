@@ -191,7 +191,7 @@ function openTokenList(){
   };
 }
 function frame(){
-  if (pings.length) dirty = true;
+  if (pings.length || smoothBusy || walking) dirty = true;
   if (dirty) { dirty = false; paint(); selBar(); }
   requestAnimationFrame(frame);
 }
@@ -236,7 +236,7 @@ function paint(){
   for (const dr of drawings) paintDrawing(dr);
   if (drag?.kind === "draw" && drag.shape) paintDrawing(drag.shape, true);
   // tokens
-  const ts = tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t);
+  const ts = curTs = tsNow();
   paintDoors();
   for (const t of ts) if (isProp(t) && (isGM || !t.h)) paintProp(t);
   const lightOn = !isGM ? viewers().length : gmPreview && tokens.some(t => VI(t) && t.o);
@@ -462,7 +462,7 @@ function visibleMask(vs, ts){ // U = o que os tokens em vs enxergam; retorna [U,
 }
 function paintLighting(vs, alpha = 1){
   if (!vs.length) return;
-  const ts = tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t);
+  const ts = curTs || tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t);
   const live = vs.map(t => ts.find(x => x.id === t.id) || t);
   const [U, B] = visibleMask(live, ts);
   const [oc, ox] = off("O");
@@ -481,7 +481,8 @@ function paintLighting(vs, alpha = 1){
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(oc, 0, 0); ctx.restore();
   // paredes destacadas por cima da escuridão, só onde o jogador enxerga (ou já viu, mais apagadas)
   const [wc, wx] = off("WL"); W(wx);
-  if (paintWallsPlayer(wx)) {
+  const hasW = paintWallsPlayer(wx); if (walls().some(w => w.d && !w.s)) { W(wx); paintDoors(wx); }
+  if (hasW || walls().some(w => w.d && !w.s)) {
     const [mc, mx] = off("WM"), dpr = devicePixelRatio || 1, bl = Math.max(3, G().size * .12 * cam.z * dpr);
     if (exI && fog.exBox) { const [x0, y0, w, h] = fog.exBox; W(mx); mx.globalAlpha = .5; mx.drawImage(exI, x0, y0, w, h); mx.globalAlpha = 1; mx.setTransform(1, 0, 0, 1, 0, 0); }
     mx.filter = `blur(${bl}px)`; for (let k = 0; k < 3; k++) mx.drawImage(U, 0, 0); mx.filter = "none";
@@ -612,21 +613,52 @@ function paintReach(){
   if (P && P.length > 1) paintPath({t, path: P, grid: true, moved: true});
   else if (!P) { const [x, y] = cellCenter(...hoverCell); ctx.save(); ctx.beginPath(); cellPath(ctx, ...hoverCell); ctx.strokeStyle = "#e0735e"; ctx.lineWidth = 2 / cam.z; ctx.stroke(); label(x, y, "longe demais ou bloqueado"); ctx.restore(); }
 }
-function walkTo(t, P){
+const lerpAng = (a, b, k) => { const d = ((((b - a) % 360) + 540) % 360) - 180; return (a + d * k + 360) % 360; };
+function walkTo(t, P){ // anda liso pelo caminho, virando para onde vai
   const cells = P.slice(1); if (!cells.length) return;
-  const ox = t.x, oy = t.y, centers = P.map(c => cellCenter(...c)); walking = t.id; let i = 0;
-  const step = () => {
+  const ox = t.x, oy = t.y, centers = P.map(c => cellCenter(...c));
+  const pts = [[t.x, t.y], ...cells.map(c => { const [x, y] = cellCenter(...c); return t.sn === false ? [x, y] : snapPoint(x, y, t.s || 1); })];
+  const segMs = 200, total = (pts.length - 1) * segMs, t0 = performance.now(); let lastSend = 0; walking = t.id;
+  const tick = now => {
     const cur = tokens.find(x => x.id === t.id); if (!cur) { walking = null; return; }
-    const [x, y] = t.sn === false ? cellCenter(...cells[i]) : snapPoint(...cellCenter(...cells[i]), cur.s || 1);
-    const [px, py] = centers[i], [nx, ny] = centers[i + 1];   // vira para onde está andando
-    if (Math.hypot(nx - px, ny - py) > 1) cur.a = Math.round(((Math.atan2(nx - px, -(ny - py)) * 180 / Math.PI) + 360) % 360);
-    cur.x = x; cur.y = y; tokLive[cur.id] = {x, y, a: cur.a || 0}; send("tok", {id: cur.id, x: Math.round(x), y: Math.round(y), a: cur.a || 0, live: 1}); dirty = true;
-    if (++i < cells.length) return setTimeout(step, 90);
-    delete tokLive[cur.id]; walking = null; hoverCell = null;
-    if (isGM) { pushTrail(cur, centers); send("tok", {id: cur.id, x: cur.x, y: cur.y, a: cur.a || 0}); save("tokens"); }
-    else send("tokreq", {id: cur.id, x: cur.x, y: cur.y, a: cur.a || 0, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
+    const f = Math.max(0, Math.min(pts.length - 1, (now - t0) / segMs)), i = Math.max(0, Math.min(pts.length - 2, Math.floor(f))), u = f - i;
+    const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+    cur.x = ax + (bx - ax) * u; cur.y = ay + (by - ay) * u;
+    if (Math.hypot(bx - ax, by - ay) > 1) cur.a = lerpAng(cur.a || 0, (Math.atan2(bx - ax, -(by - ay)) * 180 / Math.PI + 360) % 360, .3);
+    tokLive[cur.id] = {x: cur.x, y: cur.y, a: cur.a}; dirty = true;
+    if (now - lastSend > 50) { lastSend = now; send("tok", {id: cur.id, x: Math.round(cur.x), y: Math.round(cur.y), a: Math.round(cur.a), live: 1}); }
+    if (now - t0 < total) return requestAnimationFrame(tick);
+    const [ex, ey] = pts[pts.length - 1], [px, py] = pts[pts.length - 2];
+    cur.x = ex; cur.y = ey; cur.a = Math.round((Math.atan2(ex - px, -(ey - py)) * 180 / Math.PI + 360) % 360);
+    delete tokLive[cur.id]; walking = null; hoverCell = null; dirty = true;
+    if (isGM) { pushTrail(cur, centers); send("tok", {id: cur.id, x: cur.x, y: cur.y, a: cur.a}); save("tokens"); }
+    else send("tokreq", {id: cur.id, x: cur.x, y: cur.y, a: cur.a, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
   };
-  step();
+  requestAnimationFrame(tick);
+}
+// posição mostrada na tela: desliza até a posição real (os outros veem o movimento liso, não aos pulos)
+let stepsOn = (() => { try { return localStorage.getItem("mesa.steps") !== "0"; } catch { return true; } })();
+const disp = {}, stepAcc = {}, stepAt = {}; let lastSmoothT = performance.now(), smoothBusy = false, curTs = null;
+function footstep(t){
+  const now = performance.now(); if (now - (stepAt[t.id] || 0) < 110) return; stepAt[t.id] = now;
+  const mine = isGM || owns(t); DS.step(mine ? .42 : .26, (stepAcc[t.id + "_alt"] = !stepAcc[t.id + "_alt"]));
+}
+function tsNow(){
+  const now = performance.now(), dt = Math.min(120, now - lastSmoothT); lastSmoothT = now; smoothBusy = false;
+  const k = 1 - Math.exp(-dt / 75), S = G().size;
+  return tokens.map(t0 => {
+    const t = tokLive[t0.id] ? {...t0, ...tokLive[t0.id]} : t0; if (isProp(t)) return t;
+    const direct = walking === t.id || (drag && drag.t && drag.t.id === t.id);
+    let D = disp[t.id]; if (!D) { disp[t.id] = {x: t.x, y: t.y, a: t.a || 0}; return t; }
+    const px = D.x, py = D.y, dist = Math.hypot(t.x - D.x, t.y - D.y);
+    if (direct || dist > S * 8) { D.x = t.x; D.y = t.y; }
+    else if (dist > .4) { D.x += (t.x - D.x) * k; D.y += (t.y - D.y) * k; smoothBusy = true; } else { D.x = t.x; D.y = t.y; }
+    const ta = t.a || 0, da = ((((ta - D.a) % 360) + 540) % 360) - 180;
+    if (direct || Math.abs(da) < .5) D.a = ta; else { D.a = lerpAng(D.a, ta, k); smoothBusy = true; }
+    const mv = Math.hypot(D.x - px, D.y - py);
+    if (mv > .05 && mv < S * 3) { stepAcc[t.id] = (stepAcc[t.id] || 0) + mv; if (stepAcc[t.id] >= S * .5) { stepAcc[t.id] = 0; if (isGM || !t.h) footstep(t); } }
+    return {...t, x: D.x, y: D.y, a: D.a};
+  });
 }
 function paintPath(d){
   const pts = d.path.map(c => cellCenter(...c)); if (pts.length < 2) return;
@@ -786,6 +818,17 @@ function freshDungeonTokens(){ // nova masmorra: só os personagens dos jogadore
 }
 const hexA = (c, a) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(c || "")); if (!m) return `rgba(255,180,90,${a})`; const n = parseInt(m[1], 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 
+// ---------- o personagem do jogador olha para onde o mouse está ----------
+let lookMouse = (() => { try { return localStorage.getItem("mesa.look") !== "0"; } catch { return true; } })(), lookSend = 0, lookT = null;
+function lookTok(){ const sel = tokens.find(t => t.id === selTok && !isProp(t) && owns(t)); if (sel) return sel; const mine = tokens.filter(t => !isProp(t) && owns(t)); return mine.length === 1 ? mine[0] : null; }
+function lookAt(wx, wy){
+  const t = lookTok(); if (!t) return;
+  if (Math.hypot(wx - t.x, wy - t.y) < tokR(t) * .8) return;
+  const a = Math.round((Math.atan2(wx - t.x, -(wy - t.y)) * 180 / Math.PI + 360) % 360); if (a === Math.round(t.a || 0)) return;
+  t.a = a; dirty = true; const now = performance.now();
+  if (now - lookSend > 70) { lookSend = now; send("tok", {id: t.id, x: Math.round(t.x), y: Math.round(t.y), a, live: 1}); }
+  clearTimeout(lookT); lookT = setTimeout(() => { if (!walking) send("tokreq", {id: t.id, a: t.a, who: myNick}); }, 350);
+}
 // ---------- jogadores abrem e fecham portas (perto do próprio personagem) ----------
 function doorAt(x, y){ const tol = Math.max(10 / cam.z, G().size * .22); let best = null, bd = tol; for (const w of walls()) { if (!w.d || w.s || !w.p) continue; const dd = distSeg(x, y, [w.p[0], w.p[1]], [w.p[2], w.p[3]]); if (dd < bd) { bd = dd; best = w; } } return best; }
 const doorMid = w => [(w.p[0] + w.p[2]) / 2, (w.p[1] + w.p[3]) / 2];
@@ -798,38 +841,43 @@ function playerDoor(w){
 }
 // ---------- paredes que os jogadores enxergam (a escuridão esconde as que ainda não foram vistas) ----------
 function paintWallsPlayer(c, own){ // c já com a transformação do mundo
-  const ws = walls(); if (!ws.some(w => !w.d)) return false;
+  const ws = walls(); if (!ws.some(w => !w.d)) return false; c.save();
   const th = Math.max(3 / cam.z, G().size * .09);
   if (own) c.save(); c.lineCap = "round"; c.lineJoin = "round";
   c.beginPath(); for (const w of ws) { if (w.d) continue; if (w.c) { c.moveTo(w.c[0] + w.r, w.c[1]); c.arc(w.c[0], w.c[1], w.r, 0, Math.PI * 2); } else if (w.p) { c.moveTo(w.p[0], w.p[1]); c.lineTo(w.p[2], w.p[3]); } }
   c.strokeStyle = "rgba(0,0,0,.8)"; c.lineWidth = th + 4 / cam.z; c.stroke();
   c.strokeStyle = "#efe2c4"; c.lineWidth = th; c.stroke();
-  if (own) c.restore(); return true;
+  if (own) c.restore(); c.restore(); return true;
 }
 // ---------- portas (todos veem as portas normais; as secretas só o mestre) ----------
-function paintDoors(){
-  const th = Math.max(4, G().size * .17);
-  ctx.save(); ctx.lineCap = "butt";
+function paintDoors(c = ctx){ // portas bem marcadas (as secretas não aparecem para os jogadores)
+  const th = Math.max(6 / cam.z, G().size * .2), lw = Math.max(1.5 / cam.z, G().size * .035);
+  c.save();
   for (const w of walls()) {
     if (!w.d || w.s || !w.p) continue;
     const [x1, y1, x2, y2] = w.p, L = Math.hypot(x2 - x1, y2 - y1); if (!L) continue;
+    c.save(); c.translate(x1, y1); c.rotate(Math.atan2(y2 - y1, x2 - x1));
     if (!w.o) {
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-      ctx.strokeStyle = "#2e1a0c"; ctx.lineWidth = th + 4; ctx.stroke(); ctx.strokeStyle = "#8a5a2e"; ctx.lineWidth = th; ctx.stroke();
-      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2; ctx.beginPath(); ctx.arc(mx + (x2 - x1) / L * L * .3, my + (y2 - y1) / L * L * .3, th * .22, 0, Math.PI * 2); ctx.fillStyle = "#d8b04a"; ctx.fill();
-    } else { // aberta: girada a partir da dobradiça
-      const ux = (x2 - x1) / L, uy = (y2 - y1) / L;
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - uy * L * .85, y1 + ux * L * .85);
-      ctx.strokeStyle = "#2e1a0c"; ctx.lineWidth = th * .8 + 3; ctx.stroke(); ctx.strokeStyle = "#8a5a2e"; ctx.lineWidth = th * .8; ctx.stroke();
+      c.shadowColor = "rgba(0,0,0,.7)"; c.shadowBlur = 6;
+      c.fillStyle = "#6e4020"; c.fillRect(0, -th / 2, L, th); c.shadowBlur = 0;
+      c.strokeStyle = "rgba(40,20,8,.8)"; c.lineWidth = lw * .7; for (const k of [.33, .66]) { c.beginPath(); c.moveTo(0, -th / 2 + th * k); c.lineTo(L, -th / 2 + th * k); c.stroke(); }
+      c.strokeStyle = "#f2c35a"; c.lineWidth = lw; c.strokeRect(0, -th / 2, L, th);
+      c.fillStyle = "#3a3a40"; c.fillRect(L * .1, -th / 2, L * .06, th); c.fillRect(L * .84, -th / 2, L * .06, th);
+      c.beginPath(); c.arc(L * .7, 0, th * .2, 0, Math.PI * 2); c.fillStyle = "#ffd76a"; c.fill();
+    } else { // aberta: a folha girada pela dobradiça + o arco do movimento
+      c.beginPath(); c.moveTo(L * .9, 0); c.arc(0, 0, L * .9, 0, Math.PI / 2); c.strokeStyle = "rgba(242,195,90,.55)"; c.lineWidth = lw; c.setLineDash([lw * 3, lw * 2.5]); c.stroke(); c.setLineDash([]);
+      c.rotate(Math.PI / 2); c.fillStyle = "#6e4020"; c.fillRect(0, -th * .4, L * .9, th * .8); c.strokeStyle = "#f2c35a"; c.lineWidth = lw; c.strokeRect(0, -th * .4, L * .9, th * .8);
+      c.rotate(-Math.PI / 2); c.beginPath(); c.moveTo(0, 0); c.lineTo(L, 0); c.strokeStyle = "rgba(120,220,130,.55)"; c.lineWidth = lw; c.setLineDash([lw * 2, lw * 2]); c.stroke(); c.setLineDash([]);
     }
+    c.restore();
   }
-  ctx.restore();
+  c.restore();
 }
 
 // ---------- gerador de masmorras ----------
 function rng(seed){ let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const genOpt = Object.assign({style: "dungeon", w: 44, h: 32, rooms: 9, rmin: 3, rmax: 8, cw: 1, doors: 70, secret: 1, dead: 2, traps: 2, deco: "normal", torches: true, dark: true, seed: 1 + Math.floor(Math.random() * 99999)},
-  (() => { try { return JSON.parse(localStorage.getItem("mesa.genopt")) || {}; } catch { return {}; } })());
+const genOpt = Object.assign({style: "dungeon", w: 70, h: 50, rooms: 12, rmin: 4, rmax: 10, cw: 0, gap: 5, doors: 70, secret: 1, dead: 2, traps: 2, deco: "normal", torches: true, dark: true, seed: 1 + Math.floor(Math.random() * 99999)},
+  (() => { try { const o = JSON.parse(localStorage.getItem("mesa.genopt")) || {}; if (!o.v2) { delete o.w; delete o.h; delete o.rooms; delete o.rmin; delete o.rmax; delete o.cw; o.v2 = 1; } return o; } catch { return {}; } })());
 const saveGenOpt = () => { try { localStorage.setItem("mesa.genopt", JSON.stringify(genOpt)); } catch {} };
 const ROOMT = {
   armazem:   {n: "Armazém",    items: ["caixa", "caixas", "barril", "barris-pilha", "sacos", "saco", "pilha-caixotes", "barril"], wall: ["prateleira"]},
@@ -887,7 +935,7 @@ function caveContour(T, W, H){ // marching squares nos centros das casas: chão 
 }
 function genMap(o){
   const R = rng(o.seed), ri = (a, b) => a + Math.floor(R() * (b - a + 1)), pick = a => a[Math.floor(R() * a.length)];
-  const W = Math.max(16, Math.min(120, o.w | 0)), H = Math.max(12, Math.min(120, o.h | 0));
+  const W = Math.max(16, Math.min(160, o.w | 0)), H = Math.max(12, Math.min(160, o.h | 0)), GAP = Math.max(2, Math.min(12, o.gap ?? 5));
   let T = new Uint8Array(W * H); const RID = new Int16Array(W * H).fill(-1);
   const at = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : T[y * W + x];
   const inside = (x, y) => x >= 1 && y >= 1 && x < W - 1 && y < H - 1;
@@ -917,14 +965,16 @@ function genMap(o){
     for (let a = 0; a < 600 && rooms.length < o.rooms; a++) {
       const w = ri(rmin, rmax), h = ri(rmin, rmax), x = ri(2, W - w - 2), y = ri(2, H - h - 2);
       if (x < 2 || y < 2) continue;
-      if (rooms.some(r => x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y)) continue;
+      const gp = GAP + ri(0, 2);   // espaço entre as salas: corredores mais longos
+      if (rooms.some(r => x < r.x + r.w + gp && x + w + gp > r.x && y < r.y + r.h + gp && y + h + gp > r.y)) continue;
       rooms.push({x, y, w, h, i: rooms.length});
     }
     for (const r of rooms) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) { T[y * W + x] = 1; RID[y * W + x] = r.i; }
     const cen = r => [r.x + (r.w >> 1), r.y + (r.h >> 1)];
-    const cw = Math.max(1, Math.min(3, o.cw | 0));
-    const dig = (x, y, v) => { for (let a = 0; a < cw; a++) for (let b = 0; b < cw; b++) { const X = x + a, Y = y + b; if (inside(X, Y) && T[Y * W + X] === 0) T[Y * W + X] = v; } };
-    const corridor = (A, B, v) => {
+    let cw = 1; const cwFix = o.cw | 0;   // 0 = variado (1, 2 ou 3 casas)
+    const dig = (x, y, v) => { const o0 = -((cw - 1) >> 1); for (let a = o0; a < o0 + cw; a++) for (let b = o0; b < o0 + cw; b++) { const X = x + a, Y = y + b; if (inside(X, Y) && T[Y * W + X] === 0) T[Y * W + X] = v; } };
+    const corridor = (A, B, v, wFix) => {
+      cw = wFix || cwFix || [1, 1, 2, 2, 3][ri(0, 4)];
       let [x, y] = cen(A); const [x2, y2] = cen(B), hf = R() < .5;
       const stepX = () => { while (x !== x2) { dig(x, y, v); x += Math.sign(x2 - x); } }, stepY = () => { while (y !== y2) { dig(x, y, v); y += Math.sign(y2 - y); } };
       if (hf) { stepX(); stepY(); } else { stepY(); stepX(); } dig(x, y, v);
@@ -939,7 +989,7 @@ function genMap(o){
     // passagens secretas
     for (let k = 0; k < (o.secret | 0); k++) {
       const a = pick(rooms), b = rooms.filter(r => r !== a && !linked.has(a.i + "-" + r.i)).sort((p, q) => dd(a, p) - dd(a, q))[0];
-      if (!b) break; const cw0 = cw; o.cw = 1; corridor(a, b, 3); o.cw = cw0; linked.add(a.i + "-" + b.i); linked.add(b.i + "-" + a.i);
+      if (!b) break; corridor(a, b, 3, 1); linked.add(a.i + "-" + b.i); linked.add(b.i + "-" + a.i);
     }
     // becos sem saída
     for (let k = 0, g = 0; k < (o.dead | 0) && g < 200; g++) {
@@ -1103,8 +1153,8 @@ function openGenPanel(){
     <canvas id="genPrev" width="388" height="280" aria-label="Prévia da masmorra"></canvas>
     <div class="seg" id="gStyle" style="margin:10px 0 4px"><button data-st="dungeon" aria-pressed="${!cave}">🏰 Masmorra</button><button data-st="cave" aria-pressed="${cave}">⛰ Caverna</button><button data-st="rolled" title="Vai criando a masmorra enquanto os jogadores exploram">🎲 Rolada</button></div>
     <div class="ggrid">
-      ${num("gW", "Largura", o.w, 16, 120, "casas")}${num("gH", "Altura", o.h, 12, 120, "casas")}
-      ${cave ? "" : num("gRooms", "Salas", o.rooms, 2, 40) + num("gCw", "Corredor", o.cw, 1, 3, "casas") + num("gMin", "Sala mín.", o.rmin, 2, 12) + num("gMax", "Sala máx.", o.rmax, 3, 20) + num("gDoors", "Portas", o.doors, 0, 100, "%") + num("gSecret", "Passagens secretas", o.secret, 0, 6) + num("gDead", "Becos sem saída", o.dead, 0, 12)}
+      ${num("gW", "Largura", o.w, 16, 160, "casas")}${num("gH", "Altura", o.h, 12, 160, "casas")}
+      ${cave ? "" : num("gRooms", "Salas", o.rooms, 2, 40) + `<label class="gnum"><span>Corredor</span><select id="gCw">${[[0, "Variado (1–3)"], [1, "1 casa"], [2, "2 casas"], [3, "3 casas"]].map(([k, l]) => `<option value="${k}" ${+o.cw === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>` + num("gGap", "Espaço entre salas", o.gap ?? 5, 2, 12, "casas") + num("gMin", "Sala mín.", o.rmin, 2, 12) + num("gMax", "Sala máx.", o.rmax, 3, 20) + num("gDoors", "Portas", o.doors, 0, 100, "%") + num("gSecret", "Passagens secretas", o.secret, 0, 6) + num("gDead", "Becos sem saída", o.dead, 0, 12)}
       ${num("gTraps", "Armadilhas escondidas", o.traps, 0, 20)}
     </div>
     <label for="gDeco">Decoração</label><select id="gDeco">${[["none", "Nenhuma"], ["few", "Pouca"], ["normal", "Normal"], ["lots", "Muita"]].map(([k, l]) => `<option value="${k}" ${o.deco === k ? "selected" : ""}>${l}</option>`).join("")}</select>
@@ -1117,7 +1167,7 @@ function openGenPanel(){
   $("#pClose").onclick = closePanel;
   const read = () => {
     const v = (id, d) => { const e = $("#" + id); return e ? (+e.value || d) : d; };
-    Object.assign(genOpt, {w: v("gW", o.w), h: v("gH", o.h), rooms: v("gRooms", o.rooms), cw: v("gCw", o.cw), rmin: v("gMin", o.rmin), rmax: v("gMax", o.rmax), doors: $("#gDoors") ? +$("#gDoors").value : o.doors, secret: $("#gSecret") ? +$("#gSecret").value : o.secret, dead: $("#gDead") ? +$("#gDead").value : o.dead, traps: +$("#gTraps").value || 0, deco: $("#gDeco").value, torches: $("#gTorch").checked, dark: $("#gDark").checked, seed: +$("#gSeed").value || 1});
+    Object.assign(genOpt, {w: v("gW", o.w), h: v("gH", o.h), rooms: v("gRooms", o.rooms), cw: $("#gCw") ? +$("#gCw").value : o.cw, gap: v("gGap", o.gap ?? 5), rmin: v("gMin", o.rmin), rmax: v("gMax", o.rmax), doors: $("#gDoors") ? +$("#gDoors").value : o.doors, secret: $("#gSecret") ? +$("#gSecret").value : o.secret, dead: $("#gDead") ? +$("#gDead").value : o.dead, traps: +$("#gTraps").value || 0, deco: $("#gDeco").value, torches: $("#gTorch").checked, dark: $("#gDark").checked, seed: +$("#gSeed").value || 1});
     saveGenOpt(); clearTimeout(genT); genT = setTimeout(runGen, 120);
   };
   $("#panel").querySelectorAll("input,select").forEach(e => e.onchange = read);
@@ -1278,11 +1328,11 @@ function rollContent(R, area, cells, kind, busy, lines){
 function rollStart(){
   if ((scene.bg || walls().length || tokens.some(isProp)) && !confirm("Começar uma masmorra rolada? O mapa atual (imagem, paredes e objetos) vai ser trocado. Ctrl+Z desfaz.")) return;
   if (G().type === "hex") scene.grid = {...scene.grid, type: "square"};
-  const W = 90, H = 70, R = {w: W, h: H, a: new Array(W * H).fill(0), areas: [], ex: [], iw: [], idr: [], log: [], eid: 0};
+  const W = 130, H = 104, R = {w: W, h: H, a: new Array(W * H).fill(0), areas: [], ex: [], iw: [], idr: [], log: [], eid: 0};
   Object.assign(scene, {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, roll: R, gen: {v: 2, rolled: 1, style: "dungeon", w: W, h: H, t: "", x0: G().ox || 0, y0: G().oy || 0, s: G().size, seed: Date.now() % 1e6}});
   if (genOpt.dark) scene.light = "dark";
   const chars = freshDungeonTokens(); tokens = chars; scene.walls = []; drawings = drawings.filter(d => d.t !== "tpl"); save("drawings");
-  const x0 = 42, y0 = 32, cells = []; for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) cells.push([x0 + x, y0 + y]);
+  const x0 = 63, y0 = 50, cells = []; for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) cells.push([x0 + x, y0 + y]);
   const area = {id: 1, k: "entrada", nm: "Entrada", shape: "Entrada", c: [x0 + 2.5, y0 + 2.5], txt: []};
   R.areas.push(area); for (const [x, y] of cells) R.a[y * W + x] = 1;
   const n = rd(4), ex = rollExits(R, cells, n, -1, "door"); ex.forEach(e => e.a = 1); R.ex.push(...ex);
@@ -1310,8 +1360,14 @@ function rollStep(exId){
   let nEx; if (rollChoice.exits === "roll") { nEx = rd(4); lines.push(`🚪 Saídas — 1d4 = ${nEx}`); } else { nEx = +rollChoice.exits; lines.push(`🚪 Saídas: ${nEx}`); }
   const [dx, dy] = DIRS[e.d], O = [e.c[0] + dx, e.c[1] + dy];
   let cells = null, meta = null, conn = [];
+  let cwid = 1;
+  const corrCells = (L, w) => { // corredor: 1 casa na porta e depois a largura escolhida
+    const cs = [O.slice()], px = -dy, py = dx, o0 = -((w - 1) >> 1);
+    for (let k = 1; k < L; k++) for (let j = o0; j < o0 + w; j++) cs.push([O[0] + dx * k + px * j, O[1] + dy * k + py * j]);
+    return cs;
+  };
   if (kind === "corredor") {
-    for (let L = 4 + rd(3); L >= 2 && !cells; L--) { const cs = []; for (let k = 0; k < L; k++) cs.push([O[0] + dx * k, O[1] + dy * k]); if (rollFits(R, cs, O)) cells = cs; }
+    for (const w of [[1, 1, 2, 2, 3][rd(5) - 1], 2, 1]) { for (let L = 6 + rd(7); L >= 3 && !cells; L -= 2) { const cs = corrCells(L, w); if (rollFits(R, cs, O)) { cells = cs; cwid = w; } } if (cells) break; }
   } else {
     const tryShape = (si, cl) => {
       const sm = shapeMask(si, e.d), set = new Set(sm.m.map(c => c[0] + "," + c[1]));
@@ -1323,11 +1379,11 @@ function rollStep(exId){
       }
       return null;
     };
-    for (const cl of [2, 1, 3, 4]) { cells = tryShape(shapeI, cl); if (cells) break; }
+    for (const cl of [2 + rd(3), 3, 2, 1, 5]) { cells = tryShape(shapeI, cl); if (cells) break; }
     if (!cells) for (const cl of [2, 1, 3]) { cells = tryShape(0, cl); if (cells) { lines.push("(não coube: virou uma sala pequena)"); shapeI = 0; break; } }
   }
   if (!cells && kind !== "corredor") { // nem sala pequena coube: vira um corredor
-    for (let L = 5; L >= 2 && !cells; L--) { const cs = []; for (let k = 0; k < L; k++) cs.push([O[0] + dx * k, O[1] + dy * k]); if (rollFits(R, cs, O)) cells = cs; }
+    for (let L = 8; L >= 2 && !cells; L--) { const cs = corrCells(L, 1); if (rollFits(R, cs, O)) cells = cs; }
     if (cells) { kind = "corredor"; kname = "Corredor"; meta = null; conn = []; lines.push("(não coube uma sala aqui: virou um corredor)"); }
   }
   if (!cells) {
@@ -1337,13 +1393,15 @@ function rollStep(exId){
   }
   const id = R.areas.length + 1, isCorr = kind === "corredor";
   const nm = isCorr ? `Corredor ${R.areas.filter(a => a.k === "corredor").length + 1}` : `Sala ${R.areas.filter(a => a.k !== "corredor" && a.k !== "entrada").length + 1}`;
+  if (isCorr) lines.push(`↔ Corredor de ${cwid} casa${cwid > 1 ? "s" : ""} de largura`);
   const all = conn.concat(cells), area = {id, k: isCorr ? "corredor" : kind, nm, shape: isCorr ? "Corredor" : RT_SHAPES[shapeI], c: [all.reduce((s, c) => s + c[0], 0) / all.length + .5, all.reduce((s, c) => s + c[1], 0) / all.length + .5], txt: []};
   R.areas.push(area); for (const [x, y] of all) R.a[y * W + x] = id;
   e.st = "done"; e.to = id;
   // saídas novas
   let ex;
   if (isCorr) {
-    const last = cells[cells.length - 1], first = rollExits(R, [last], 1, (e.d + 2) % 4, "open").filter(x => x.d === e.d);
+    const far = Math.max(...cells.map(c => c[0] * dx + c[1] * dy)), tip = cells.filter(c => c[0] * dx + c[1] * dy === far);
+    const first = rollExits(R, tip, 1, (e.d + 2) % 4, "open").filter(x => x.d === e.d);
     const side = nEx > 1 ? rollExits(R, cells.slice(1), nEx - 1, (e.d + 2) % 4, "open").filter(x => x.d !== e.d) : [];
     ex = first.concat(side).slice(0, nEx);
     if (!ex.length) ex = rollExits(R, all, 1, (e.d + 2) % 4, "open");
@@ -1820,6 +1878,7 @@ cv.addEventListener("pointermove", e => {
     if (tool === "fog" && isGM && opt.fogShape === "brush") { hoverFog = [wx, wy]; dirty = true; }
     if (tool === "wall" && wallDraft) { hoverWall = snapWall(wx, wy, e.shiftKey); dirty = true; }
     if (tool === "move") { const dw = doorAt(wx, wy); cv.style.cursor = dw && (isGM || tokens.some(t => !isProp(t) && owns(t) && nearDoor(t, dw))) ? "pointer" : ""; }
+    if (!isGM && lookMouse && !walking) lookAt(wx, wy);
     if (clickMoveTok()) { const c = cellAt(wx, wy); if (!hoverCell || c[0] !== hoverCell[0] || c[1] !== hoverCell[1]) { hoverCell = c; dirty = true; } }
     return;
   }
@@ -2041,6 +2100,8 @@ function drawTop(){
     ${isGM ? `<div class="seg light" id="lightSeg" title="Iluminação do mapa">${[["day", "☀ Dia"], ["dim", "🌗 Penumbra"], ["dark", "🌑 Escuro"]].map(([k, l]) => `<button data-light="${k}" aria-pressed="${(scene.light || "day") === k}">${l}</button>`).join("")}</div>
       <button class="btn" id="prevBtn" aria-pressed="${gmPreview}" title="Mostra por cima do mapa o que os jogadores enxergam">${I.eye} Ver como jogadores</button>` : ""}
     <button class="btn" id="trailBtn" aria-pressed="${showTrails}" title="Mostrar o rastro de todos os tokens">👣 Rastros</button>
+    <button class="btn" id="stepBtn" aria-pressed="${stepsOn}" title="Som de passos quando os personagens andam">${stepsOn ? "🔊" : "🔇"} Passos</button>
+    ${!isGM ? `<button class="btn" id="lookBtn" aria-pressed="${lookMouse}" title="Seu personagem olha para onde o mouse está">🧭 Olhar p/ mouse</button>` : ""}
     ${isGM ? `<button class="btn" id="turnBtn" title="Apaga os rastros de todos (começo de um novo turno)">⟳ Novo turno</button>` : ""}
     ${isGM ? `<button class="btn" id="castBtn" title="Faz a tela dos jogadores ir para onde você está olhando">${I.cast} Levar jogadores aqui</button>` : ""}
     <div class="zoom"><button class="btn small" id="zOut" aria-label="Diminuir zoom">${I.minus}</button><span>${Math.round(cam.z * 100)}%</span><button class="btn small" id="zIn" aria-label="Aumentar zoom">${I.plus}</button><button class="btn small" id="zFit" title="Enquadrar o mapa (0)" aria-label="Enquadrar">${I.fit}</button></div>`;
@@ -2048,6 +2109,8 @@ function drawTop(){
   const ls = $("#lightSeg"); if (ls) ls.onclick = e => { const b = e.target.closest("[data-light]"); if (!b) return; scene.light = b.dataset.light; save("scene"); dirty = true; drawTop(); };
   const pb = $("#prevBtn"); if (pb) pb.onclick = () => { gmPreview = !gmPreview; dirty = true; drawTop(); if (gmPreview && !tokens.some(t => VI(t) && t.o)) toast("Nenhum token de jogador tem visão ainda (aba “Visão e luz” do token)."); };
   $("#trailBtn").onclick = () => { showTrails = !showTrails; dirty = true; drawTop(); };
+  $("#stepBtn").onclick = () => { stepsOn = !stepsOn; try { localStorage.setItem("mesa.steps", stepsOn ? "1" : "0"); } catch {} drawTop(); if (stepsOn) DS.step(.4); };
+  const lb = $("#lookBtn"); if (lb) lb.onclick = () => { lookMouse = !lookMouse; try { localStorage.setItem("mesa.look", lookMouse ? "1" : "0"); } catch {} drawTop(); };
   const tb = $("#turnBtn"); if (tb) tb.onclick = () => { let n = 0; for (const t of tokens) if (t.tr?.length) { t.tr = []; n++; } save("tokens"); dirty = true; selBarKey = ""; toast(n ? "Novo turno: rastros apagados." : "Novo turno."); };
   const cb = $("#castBtn"); if (cb) cb.onclick = () => { const [wx, wy] = toWorld(innerWidth / 2, innerHeight / 2); send("view", {x: wx, y: wy, z: cam.z}); toast("Jogadores levados para a sua visão."); };
 }
@@ -2386,6 +2449,10 @@ const DS = { ctx: null, out: null,
     if (!this.init()) return; const t0 = this.ctx.currentTime; let t = 0, i = 0;
     while (t < dur) { const k = t / dur; this.click(t0 + t, 180 + Math.random() * 90, .08 + k * .32, .06, 1.2); this.click(t0 + t, 2400, .03 + k * .08, .03, 2); t += .055 - k * .02 + (i++ % 2 ? .006 : 0); }
     this.tone(t0, 55, dur, .12 + .0, "sine", 90);
+  },
+  step(v = .4, alt){ // passo: baque surdo + raspar leve
+    if (!stepsOn || !this.init()) return; const t = this.ctx.currentTime, f = alt ? 1 : 1.15;
+    this.click(t, 150 * f, v, .09, 1.2); this.tone(t, 95 * f, .08, v * .45, "sine", 55); this.click(t + .015, 1100 * f + Math.random() * 400, v * .18, .06, 1.4);
   },
   heart(){ if (!this.init()) return; const t = this.ctx.currentTime; this.tone(t, 70, .18, .5, "sine", 40); this.tone(t + .22, 64, .2, .38, "sine", 38); },
   land(){ if (!this.init()) return; const t = this.ctx.currentTime; this.click(t, 1300 + Math.random() * 500, .6, .05); this.tone(t, 170, .09, .3, "sine", 90); },
