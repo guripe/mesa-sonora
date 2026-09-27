@@ -123,7 +123,7 @@ function getImg(url){
 let selBarKey = "";
 function selBar(){
   const t = tokens.find(x => x.id === selTok), can = t && (isGM || owns(t));
-  const key = can ? [t.id, t.n, t.h, isGM, JSON.stringify(t.b || []), (t.tr || []).length].join("|") : "";
+  const key = can ? [t.id, t.n, t.h, isGM, JSON.stringify(t.b || []), (t.tr || []).length, t.pw, t.ph].join("|") : "";
   if (key === selBarKey) return; selBarKey = key;
   let el = $("#selbar"); if (!el) { el = document.createElement("div"); el.id = "selbar"; el.className = "selbar"; document.body.appendChild(el); }
   if (!can) { el.hidden = true; return; }
@@ -136,6 +136,7 @@ function selBar(){
   el.innerHTML = `<div class="sbrow"><b>${esc(t.n || "Token")}</b>
     ${isGM ? `<button class="btn small" data-sb="edit">✎ Editar</button>` : ""}
     <button class="btn small" data-sb="l" title="Girar (Q)" aria-label="Girar para a esquerda">↺</button><button class="btn small" data-sb="r" title="Girar (E)" aria-label="Girar para a direita">↻</button>
+    ${isGM && isProp(t) ? `<button class="btn small" data-sb="smaller" title="Diminuir (ou arraste um canto)" aria-label="Diminuir">－</button><span class="sbsize">${String(t.pw || 1).replace(".", ",")}×${String(t.ph || 1).replace(".", ",")}</span><button class="btn small" data-sb="bigger" title="Aumentar (ou arraste um canto)" aria-label="Aumentar">＋</button>` : ""}
     ${isGM && !isProp(t) && t.tr?.length ? `<button class="btn small" data-sb="back" title="Volta para onde estava antes do último movimento">↶ Voltar movimento</button><button class="btn small" data-sb="trail" title="Apagar o rastro deste token">🧹 Rastro</button>` : ""}
     ${isGM ? `<button class="btn small" data-sb="hide">${t.h ? "👁 Mostrar aos jogadores" : "🚫 Ocultar"}</button><button class="btn small danger" data-sb="del">Remover</button>` : ""}</div>
     ${barUI ? `<div class="sbrow">${barUI}</div>` : ""}`;
@@ -158,6 +159,11 @@ function selBar(){
     if (a === "back") { const mv = cur.tr?.pop(); if (!mv) return; const [x, y] = mv[0]; cur.x = x; cur.y = y; send("tok", {id: cur.id, x, y, a: cur.a}); save("tokens"); dirty = true; selBarKey = ""; return toast("Movimento desfeito."); }
     if (a === "trail") { cur.tr = []; save("tokens"); dirty = true; selBarKey = ""; return; }
     else if (a === "l" || a === "r") rotateSel(a === "l" ? -1 : 1);
+    else if (a === "bigger" || a === "smaller") { // aumenta/diminui mantendo a proporção
+      const k = a === "bigger" ? 1 : -1, w = cur.pw || 1, h = cur.ph || 1, s0 = Math.min(w, h), s1 = Math.max(1, Math.min(20, s0 + k));
+      if (s1 === s0) return; const f = s1 / s0; cur.pw = Math.max(1, Math.min(20, Math.round(w * f))); cur.ph = Math.max(1, Math.min(20, Math.round(h * f)));
+      const [x, y] = snapProp(cur, cur.x, cur.y); cur.x = x; cur.y = y; save("tokens"); dirty = true; selBarKey = ""; return;
+    }
     else if (a === "hide") { cur.h = !cur.h; save("tokens"); dirty = true; toast(cur.h ? "Token oculto dos jogadores." : "Token visível para os jogadores."); }
     else if (a === "del") { if (confirm(`Remover “${cur.n || "token"}”?`)) { tokens = tokens.filter(x => x.id !== cur.id); selTok = null; save("tokens"); dirty = true; } }
   };
@@ -267,6 +273,7 @@ function paint(){
   paintRollGM();
   paintPings();
   paintDropPrev();
+  if (drag?.kind === "propsize" && drag.at) label(drag.at[0], drag.at[1], `${String(drag.t.pw).replace(".", ",")} × ${String(drag.t.ph).replace(".", ",")} casas`);
   // réguas
   for (const k in rulers) paintRuler(rulers[k], k === myKey);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -695,12 +702,17 @@ function paintProp(t){
   if (selTok === t.id) {
     ctx.globalAlpha = 1; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / cam.z; ctx.setLineDash([6 / cam.z, 4 / cam.z]); ctx.strokeRect(-W / 2, -H / 2, W, H); ctx.setLineDash([]);
     const hy = -H / 2 - 18 / cam.z; ctx.beginPath(); ctx.moveTo(0, -H / 2); ctx.lineTo(0, hy); ctx.stroke(); ctx.beginPath(); ctx.arc(0, hy, 7 / cam.z, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill(); ctx.strokeStyle = "#000"; ctx.lineWidth = 1 / cam.z; ctx.stroke();
+    if (isGM) { const q = 9 / cam.z; for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { ctx.fillStyle = "#ffe28a"; ctx.fillRect(sx * W / 2 - q / 2, sy * H / 2 - q / 2, q, q); ctx.strokeStyle = "#1c150c"; ctx.lineWidth = 1.5 / cam.z; ctx.strokeRect(sx * W / 2 - q / 2, sy * H / 2 - q / 2, q, q); } }
   }
   if (t.h && isGM) { ctx.globalAlpha = 1; ctx.fillStyle = "#e0735e"; ctx.font = `700 ${Math.max(10 / cam.z, 12)}px sans-serif`; ctx.textAlign = "center"; ctx.fillText("oculto", 0, 0); }
   ctx.restore();
 }
 function propLocal(t, x, y){ const a = -(t.a || 0) * Math.PI / 180, dx = x - t.x, dy = y - t.y; return [dx * Math.cos(a) - dy * Math.sin(a), dx * Math.sin(a) + dy * Math.cos(a)]; }
 function hitProp(x, y){ for (let i = tokens.length - 1; i >= 0; i--) { const t = tokens[i]; if (!isProp(t)) continue; const [W, H] = propSize(t), [lx, ly] = propLocal(t, x, y); if (Math.abs(lx) <= W / 2 && Math.abs(ly) <= H / 2) return t; } return null; }
+function propCorner(t, x, y){ // pegou num dos cantos (alça de tamanho)?
+  const [W, H] = propSize(t), [lx, ly] = propLocal(t, x, y), tol = 10 / cam.z;
+  return Math.abs(Math.abs(lx) - W / 2) <= tol && Math.abs(Math.abs(ly) - H / 2) <= tol;
+}
 function propHandle(t){ const [, H] = propSize(t), [vx, vy] = dirVec(t.a || 0), d = H / 2 + 18 / cam.z; return [t.x + vx * d, t.y + vy * d]; }
 function snapProp(t, x, y){
   const g = G(); if (t.sn === false) return [Math.round(x), Math.round(y)];
@@ -2106,7 +2118,8 @@ cv.addEventListener("pointerdown", e => {
     if (!t && !isGM) { const w = doorAt(wx, wy); if (w && tokens.some(x => !isProp(x) && owns(x) && nearDoor(x, w))) { playerDoor(w); return; } }
     const sel = tokens.find(x => x.id === selTok);
     if (sel && (isGM || owns(sel))) { // pegou na setinha do token selecionado?
-      if (isProp(sel)) { const [hx, hy] = propHandle(sel); if (Math.hypot(wx - hx, wy - hy) <= 12 / cam.z) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; } }
+      if (isProp(sel)) { const [hx, hy] = propHandle(sel); if (Math.hypot(wx - hx, wy - hy) <= 12 / cam.z) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; }
+        if (isGM && propCorner(sel, wx, wy)) { drag = {kind: "propsize", t: sel, ow: sel.pw || 1, oh: sel.ph || 1, ratio: (sel.pw || 1) / (sel.ph || 1)}; cv.classList.add("panning"); return; } }
       else { const r = tokR(sel), [vx, vy] = dirVec(sel.a || 0), hx = sel.x + vx * r * 1.2, hy = sel.y + vy * r * 1.2;
         if (Math.hypot(wx - hx, wy - hy) <= Math.max(r * .38, 12 / cam.z)) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; } }
     }
@@ -2155,7 +2168,7 @@ cv.addEventListener("pointermove", e => {
   if (!drag) {
     if (tool === "fog" && isGM && opt.fogShape === "brush") { hoverFog = [wx, wy]; dirty = true; }
     if (tool === "wall" && wallDraft) { hoverWall = snapWall(wx, wy, e.shiftKey); dirty = true; }
-    if (tool === "move") { const dw = doorAt(wx, wy); cv.style.cursor = dw && (isGM || tokens.some(t => !isProp(t) && owns(t) && nearDoor(t, dw))) ? "pointer" : ""; }
+    if (tool === "move") { const sp = isGM && tokens.find(t => t.id === selTok && isProp(t)), dw = doorAt(wx, wy); cv.style.cursor = sp && propCorner(sp, wx, wy) ? "nwse-resize" : dw && (isGM || tokens.some(t => !isProp(t) && owns(t) && nearDoor(t, dw))) ? "pointer" : ""; }
     if (!isGM && lookMouse && !walking) lookAt(wx, wy);
     if (clickMoveTok()) { const c = cellAt(wx, wy); if (!hoverCell || c[0] !== hoverCell[0] || c[1] !== hoverCell[1]) { hoverCell = c; dirty = true; } }
     return;
@@ -2167,6 +2180,13 @@ cv.addEventListener("pointermove", e => {
   if (drag.kind === "tplnew") { const t = drag.t; if (t.sh === "circle") { t.x = Math.round(wx); t.y = Math.round(wy); } else if (Math.hypot(wx - t.x, wy - t.y) > 4 / cam.z) t.a = Math.round(Math.atan2(wx - t.x, -(wy - t.y)) * 180 / Math.PI); dirty = true; return; }
   if (drag.kind === "tplmove") { drag.e.t.x = Math.round(wx + drag.dx); drag.e.t.y = Math.round(wy + drag.dy); drag.moved = true; dirty = true; return; }
   if (drag.kind === "tplrot") { const t = drag.e.t; if (t.sh === "circle") { t.r = Math.max(1.5, Math.round(Math.hypot(wx - t.x, wy - t.y) / G().size * (G().unit || 1) / 1.5) * 1.5); } else t.a = Math.round(Math.atan2(wx - t.x, -(wy - t.y)) * 180 / Math.PI / 5) * 5; drag.moved = true; dirty = true; return; }
+  if (drag.kind === "propsize") { // arrasta o canto: aumenta ou diminui (Shift mantém a proporção)
+    const t = drag.t, [lx, ly] = propLocal(t, wx, wy), S = G().size, st = t.sn === false ? .25 : 1;
+    let w = Math.max(st, Math.min(20, Math.round(2 * Math.abs(lx) / S / st) * st)), h = Math.max(st, Math.min(20, Math.round(2 * Math.abs(ly) / S / st) * st));
+    if (e.shiftKey) { if (w / drag.ratio >= h) h = Math.max(st, Math.round(w / drag.ratio / st) * st); else w = Math.max(st, Math.round(h * drag.ratio / st) * st); }
+    if (w !== t.pw || h !== t.ph) { t.pw = w; t.ph = h; drag.moved = true; dirty = true; }
+    drag.at = [wx, wy]; dirty = true; return;
+  }
   if (drag.kind === "rotate") {
     let a = Math.atan2(wx - drag.t.x, -(wy - drag.t.y)) * 180 / Math.PI;
     const step = isProp(drag.t) ? (e.shiftKey ? 90 : 15) : e.shiftKey ? (G().type === "hex" ? 60 : 45) : 5; a = ((Math.round(a / step) * step) % 360 + 360) % 360;
@@ -2207,6 +2227,7 @@ function endPointer(e){
   if (d.kind === "prop") { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); } dirty = true; return; }
   if (d.kind === "tplnew") { const t = d.t; if (isGM) { drawings.push(t); save("drawings"); } else { ptpls[t.id] = t; send("tpl", {op: "set", t}); } selTpl = t.id; drawTplBar(); dirty = true; return; }
   if (d.kind === "tplmove" || d.kind === "tplrot") { if (d.moved) tplCommit(d.e); return; }
+  if (d.kind === "propsize") { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); toast(`Tamanho: ${String(d.t.pw).replace(".", ",")} × ${String(d.t.ph).replace(".", ",")} casas`, 1400); } return; }
   if (d.kind === "rotate") {
     if (isProp(d.t)) { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); } return; }
     if (d.moved) { const t = d.t; delete tokLive[t.id]; if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else send("tokreq", {id: t.id, a: t.a, who: myNick}); }
