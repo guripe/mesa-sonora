@@ -257,6 +257,7 @@ function paint(){
   const brushAt = drag?.kind === "fogbrush" ? drag.at : (!drag && tool === "fog" && isGM && opt.fogShape === "brush" ? hoverFog : null);
   if (brushAt) { const [a, b] = cellAt(...brushAt); ctx.beginPath(); for (const [ca, cb] of cellsInRange(a, b, opt.brush)) cellPath(ctx, ca, cb); ctx.strokeStyle = opt.fog === "reveal" ? "#ffe28a" : "#e0735e"; ctx.lineWidth = 2 / cam.z; ctx.stroke(); }
   if (drag?.kind === "token" && drag.grid && drag.moved) paintPath(drag);
+  paintReach();
   paintPings();
   // réguas
   for (const k in rulers) paintRuler(rulers[k], k === myKey);
@@ -564,9 +565,53 @@ function pathStep(d, target){ // estende o caminho do arraste até a casa alvo, 
     P.push(best[0]);
   }
 }
+// ---------- clicar para andar ----------
+let hoverCell = null, reachCache = {key: "", map: null}, walking = null;
+function reach(t){ // casas alcançáveis a partir do token (desvia de paredes; respeita o deslocamento do jogador)
+  const lim = isGM ? 60 : maxCells(t), start = cellAt(t.x, t.y);
+  const key = [t.id, Math.round(t.x), Math.round(t.y), wallsVer, lim, G().size, G().type, FL()].join("|");
+  if (reachCache.key === key) return reachCache.map;
+  const map = new Map(), k0 = start.join(","); map.set(k0, {c: start, prev: null, d: 0});
+  const q = [start];
+  while (q.length) {
+    const c = q.shift(), cur = map.get(c.join(",")); if (cur.d >= lim) continue;
+    const [cx, cy] = cellCenter(...c);
+    for (const [da, db] of NEI()) {
+      const n = [c[0] + da, c[1] + db], k = n.join(","); if (map.has(k)) continue;
+      const [nx, ny] = cellCenter(...n);
+      if (!isGM && blockedMove(cx, cy, nx, ny)) continue;
+      map.set(k, {c: n, prev: c, d: cur.d + 1}); q.push(n);
+      if (map.size > 6000) break;
+    }
+  }
+  reachCache = {key, map}; return map;
+}
+function pathTo(t, target){ const m = reach(t), e = m.get(target.join(",")); if (!e) return null; const out = []; let c = target; while (c) { out.unshift(c); c = m.get(c.join(",")).prev; } return out; }
+function clickMoveTok(){ const t = tokens.find(x => x.id === selTok); return t && !isProp(t) && !isGM && owns(t) && tool === "move" && !walking ? t : null; }  // só jogadores (o mestre continua arrastando)
+function paintReach(){
+  const t = clickMoveTok(); if (!t || !hoverCell || drag) return;
+  if (!isGM) { const m = reach(t); ctx.save(); ctx.beginPath(); for (const {c} of m.values()) cellPath(ctx, ...c); ctx.fillStyle = "rgba(255,226,138,.06)"; ctx.fill(); ctx.restore(); }
+  const P = pathTo(t, hoverCell);
+  if (P && P.length > 1) paintPath({t, path: P, grid: true, moved: true});
+  else if (!P) { const [x, y] = cellCenter(...hoverCell); ctx.save(); ctx.beginPath(); cellPath(ctx, ...hoverCell); ctx.strokeStyle = "#e0735e"; ctx.lineWidth = 2 / cam.z; ctx.stroke(); label(x, y, "longe demais ou bloqueado"); ctx.restore(); }
+}
+function walkTo(t, P){
+  const cells = P.slice(1); if (!cells.length) return;
+  const ox = t.x, oy = t.y, centers = P.map(c => cellCenter(...c)); walking = t.id; let i = 0;
+  const step = () => {
+    const cur = tokens.find(x => x.id === t.id); if (!cur) { walking = null; return; }
+    const [x, y] = t.sn === false ? cellCenter(...cells[i]) : snapPoint(...cellCenter(...cells[i]), cur.s || 1);
+    cur.x = x; cur.y = y; tokLive[cur.id] = {x, y}; send("tok", {id: cur.id, x: Math.round(x), y: Math.round(y), a: cur.a || 0, live: 1}); dirty = true;
+    if (++i < cells.length) return setTimeout(step, 90);
+    delete tokLive[cur.id]; walking = null; hoverCell = null;
+    if (isGM) { pushTrail(cur, centers); send("tok", {id: cur.id, x: cur.x, y: cur.y}); save("tokens"); }
+    else send("tokreq", {id: cur.id, x: cur.x, y: cur.y, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
+  };
+  step();
+}
 function paintPath(d){
   const pts = d.path.map(c => cellCenter(...c)); if (pts.length < 2) return;
-  const lim = isGM ? Infinity : maxCells(d.t), steps = pts.length - 1, full = steps >= lim;
+  const lim = isGM ? Infinity : maxCells(d.t), steps = pts.length - 1, full = !!d.limit || steps > lim;
   ctx.save(); ctx.lineCap = ctx.lineJoin = "round";
   ctx.beginPath(); for (const c of d.path) cellPath(ctx, ...c); ctx.fillStyle = full ? "rgba(224,115,94,.16)" : "rgba(255,226,138,.14)"; ctx.fill();
   ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
@@ -714,7 +759,7 @@ function doPing(wx, wy, center){
 let showTrails = false;
 function pushTrail(t, pts){
   if (!pts || pts.length < 2) return;
-  t.tr = (t.tr || []).concat([pts.map(([x, y]) => [Math.round(x), Math.round(y)])]).slice(-8);
+  t.tr = [pts.map(([x, y]) => [Math.round(x), Math.round(y)])];   // guarda só o último movimento
 }
 function paintTrail(t){
   const tr = t.tr; if (!tr?.length) return;
@@ -903,8 +948,10 @@ cv.addEventListener("pointerdown", e => {
     if (te) { selTpl = te.t.id; selTok = null; drag = {kind: "tplmove", e: te, dx: te.t.x - wx, dy: te.t.y - wy, moved: false}; dirty = true; drawTplBar(); return; }
     const pr = !t && isGM && hitProp(wx, wy);
     if (pr) { selTok = pr.id; selTpl = null; drawTplBar(); drag = {kind: "prop", t: pr, dx: pr.x - wx, dy: pr.y - wy, moved: false}; dirty = true; return; }
-    selTok = null; if (selTpl) { selTpl = null; drawTplBar(); } dirty = true;
-    drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return;
+    const walker = clickMoveTok();
+    if (!walker) selTok = null;
+    if (selTpl) { selTpl = null; drawTplBar(); } dirty = true;
+    drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y, walk: walker ? {id: walker.id, c: cellAt(wx, wy)} : null}; cv.classList.add("panning"); return;
   }
   if (tool === "spell") { const sp = curSpell(); drag = {kind: "tplnew", t: {id: uid(), t: "tpl", n: sp.n, ic: sp.ic, sh: sp.sh, r: sp.r, wd: sp.wd, c: sp.c, x: Math.round(wx), y: Math.round(wy), a: 0, own: isGM ? undefined : myKey}}; dirty = true; return; }
   if (tool === "ruler") { const a = snapPoint(wx, wy); rulers[myKey] = {a, b: a}; drag = {kind: "ruler"}; dirty = true; sendRuler(); return; }
@@ -939,9 +986,11 @@ cv.addEventListener("pointermove", e => {
   if (!drag) {
     if (tool === "fog" && isGM && opt.fogShape === "brush") { hoverFog = [wx, wy]; dirty = true; }
     if (tool === "wall" && wallDraft) { hoverWall = snapWall(wx, wy, e.shiftKey); dirty = true; }
+    if (clickMoveTok()) { const c = cellAt(wx, wy); if (!hoverCell || c[0] !== hoverCell[0] || c[1] !== hoverCell[1]) { hoverCell = c; dirty = true; } }
     return;
   }
   if (drag.kind === "pinch" && pts.size === 2) { const [p1, p2] = [...pts.values()]; const d = Math.hypot(p1[0] - p2[0], p1[1] - p2[1]); zoomAt((drag.z * d / drag.d) / cam.z, (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2); return; }
+  if (drag.kind === "pan" && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 5) drag.panned = true;
   if (drag.kind === "pan") { cam.x = drag.cx + e.clientX - drag.sx; cam.y = drag.cy + e.clientY - drag.sy; dirty = true; return; }
   if (drag.kind === "prop") { drag.t.x = wx + drag.dx; drag.t.y = wy + drag.dy; drag.moved = true; dirty = true; return; }
   if (drag.kind === "tplnew") { const t = drag.t; if (t.sh === "circle") { t.x = Math.round(wx); t.y = Math.round(wy); } else if (Math.hypot(wx - t.x, wy - t.y) > 4 / cam.z) t.a = Math.round(Math.atan2(wx - t.x, -(wy - t.y)) * 180 / Math.PI); dirty = true; return; }
@@ -976,6 +1025,14 @@ function endPointer(e){
   if (!drag) return;
   const d = drag; drag = null;
   if (d.kind === "pinch") return;
+  if (d.kind === "pan" && d.walk && !d.panned) { // clique curto com o próprio token selecionado: anda até lá
+    const t = tokens.find(x => x.id === d.walk.id); if (!t) return;
+    const P = pathTo(t, d.walk.c);
+    if (P && P.length > 1) walkTo(t, P);
+    else if (!P) { toast(isGM ? "Longe demais." : "Não dá para chegar lá (parede ou longe demais)."); }
+    else { selTok = null; hoverCell = null; dirty = true; }
+    return;
+  }
   if (d.kind === "prop") { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); } dirty = true; return; }
   if (d.kind === "tplnew") { const t = d.t; if (isGM) { drawings.push(t); save("drawings"); } else { ptpls[t.id] = t; send("tpl", {op: "set", t}); } selTpl = t.id; drawTplBar(); dirty = true; return; }
   if (d.kind === "tplmove" || d.kind === "tplrot") { if (d.moved) tplCommit(d.e); return; }
@@ -1020,6 +1077,7 @@ addEventListener("keydown", e => {
   if (k === "enter" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (k === "escape" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (k === "escape" && diceModal) { closeDiceModal(); return; }
+  if (k === "escape" && selTok) { selTok = null; hoverCell = null; dirty = true; return; }
   if (k === "escape") { if (rulers[myKey]) { delete rulers[myKey]; sendRuler(); dirty = true; } closePanel(); closeFlyout(); selTok = null; return; }
   if (k === "+" || k === "=") return zoomAt(1.2);
   if (k === "-") return zoomAt(1 / 1.2);
@@ -1643,6 +1701,8 @@ function openDiceModal(focus){
 }
 addEventListener("keydown", e => { if (e.key === "Escape" && diceModal) { e.preventDefault(); closeDiceModal(); } }, true);
 function closeDiceModal(){ diceModal = false; $("#diceModal")?.remove(); }
+const MAP_VER = 15;
+function newVersion(){ if ($("#verBanner")) return; const b = document.createElement("div"); b.id = "verBanner"; b.className = "toast"; b.style.bottom = "auto"; b.style.top = "64px"; b.innerHTML = "Tem uma versão nova do mapa. Aperte <b>Ctrl + F5</b> para atualizar."; document.body.appendChild(b); }
 const stageQ = []; let stageBusy = false;
 function addRoll(r, mine){
   r.fresh = true; r.mine = !!mine; if (mine) lastResult = r;
@@ -1701,6 +1761,7 @@ function nextStage(){
     const tot = st.querySelector(".ds-total"); let k = 0; const steps = 12, from = Math.max(0, r.total - 12);
     const count = () => { if (!st.isConnected) return; k++; tot.textContent = k >= steps ? r.total : Math.round(from + (r.total - from) * k / steps); if (k < steps) setTimeout(count, 22); };
     tot.classList.add("show"); count(); DS.reveal();
+    if (r.sfxDone) return finishRoll(r), setTimeout(close, 1500); r.sfxDone = true;
     if (nat === "crit") { st.classList.add("crit"); st.querySelector(".ds-tag").innerHTML = '<span class="crit-tag">⚔️ CRÍTICO! 20 natural ⚔️</span>'; critBurst(st, els[key]); DS.crit(); }
     else if (nat === "fumble") { st.classList.add("fumble"); st.querySelector(".ds-tag").innerHTML = '<span class="fumble-tag">💀 FALHA CRÍTICA… 1 natural</span>'; fumbleFx(st, els[key]); DS.fumble(); }
     finishRoll(r);
@@ -1724,7 +1785,7 @@ function fumbleFx(st, el){
 function doRoll(formula, adv = 0, label = "", secret = false, snd = null){
   let res; try { res = rollFormula(formula, adv); } catch (err) { toast("Não rolei: " + err.message); return; }
   if (adv) res.f += adv > 0 ? " (vantagem)" : " (desvantagem)";
-  const r = {id: uid(), who: isGM ? "Mestre" : (myNick || "Jogador"), label: label || "", ...res, secret: !!secret, snd: cleanSnd(snd)};
+  const r = {id: uid(), v: MAP_VER, who: isGM ? "Mestre" : (myNick || "Jogador"), label: label || "", ...res, secret: !!secret, snd: cleanSnd(snd)};
   if (!r.secret) send("roll", r);
   addRoll(r, true);
 }
@@ -1771,7 +1832,7 @@ async function boot(){
   chan.on("broadcast", {event: "ruler"}, ({payload: p}) => { if (!p?.k) return; if (p.r) rulers[p.k] = p.r; else delete rulers[p.k]; dirty = true; });
   chan.on("broadcast", {event: "state"}, ({payload: p}) => { if (!isGM && p?.col) apply({[p.col]: p.val}); });
   if (!isGM) setInterval(load, 20000);                 // rede de segurança
-  chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (r?.id && Array.isArray(r.dice)) addRoll({snd: cleanSnd(r.snd), id: String(r.id), who: String(r.who || "?").slice(0, 30), label: String(r.label || "").slice(0, 30), f: String(r.f || "").slice(0, 60), mod: +r.mod || 0, total: +r.total || 0, dice: r.dice.slice(0, 60).filter(x => x.d >= 2 && x.d <= 1000).map(x => ({d: +x.d, v: +x.v, x: x.x ? 1 : 0})), secret: false}); });
+  chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (+r?.v > MAP_VER) newVersion(); if (r?.id && Array.isArray(r.dice) && !diceLog.some(x => x.id === String(r.id)) && !stageQ.some(x => x.id === String(r.id))) addRoll({snd: cleanSnd(r.snd), id: String(r.id), who: String(r.who || "?").slice(0, 30), label: String(r.label || "").slice(0, 30), f: String(r.f || "").slice(0, 60), mod: +r.mod || 0, total: +r.total || 0, dice: r.dice.slice(0, 60).filter(x => x.d >= 2 && x.d <= 1000).map(x => ({d: +x.d, v: +x.v, x: x.x ? 1 : 0})), secret: false}); });
   chan.on("broadcast", {event: "ping"}, ({payload: p}) => { if (!p || !isFinite(+p.x)) return; addPing(p); if (p.center && !isGM) centerOn(+p.x, +p.y, Math.max(cam.z, .8)); });
   chan.on("broadcast", {event: "tpl"}, ({payload: p}) => {
     if (p?.op === "del") { delete ptpls[p.id]; if (selTpl === p.id) { selTpl = null; drawTplBar(); } }
