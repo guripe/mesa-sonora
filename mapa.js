@@ -239,6 +239,8 @@ function paint(){
   const ts = tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t);
   paintDoors();
   for (const t of ts) if (isProp(t) && (isGM || !t.h)) paintProp(t);
+  const lightOn = !isGM ? viewers().length : gmPreview && tokens.some(t => VI(t) && t.o);
+  if ((!isGM || gmPreview) && !lightOn) paintWallsPlayer(ctx, true);
   for (const e of allTpls()) paintTpl(e.t, selTpl === e.t.id);
   if (drag?.kind === "tplnew") paintTpl(drag.t, true);
   for (const t of ts) if (!isProp(t) && (isGM || !t.h) && (showTrails || selTok === t.id)) paintTrail(t);
@@ -262,6 +264,7 @@ function paint(){
   if (brushAt) { const [a, b] = cellAt(...brushAt); ctx.beginPath(); for (const [ca, cb] of cellsInRange(a, b, opt.brush)) cellPath(ctx, ca, cb); ctx.strokeStyle = opt.fog === "reveal" ? "#ffe28a" : "#e0735e"; ctx.lineWidth = 2 / cam.z; ctx.stroke(); }
   if (drag?.kind === "token" && drag.grid && drag.moved) paintPath(drag);
   paintReach();
+  paintRollGM();
   paintPings();
   // réguas
   for (const k in rulers) paintRuler(rulers[k], k === myKey);
@@ -476,6 +479,15 @@ function paintLighting(vs, alpha = 1){
   px.globalCompositeOperation = "source-in"; px.fillStyle = "#060504"; px.fillRect(0, 0, pc.width, pc.height);
   ox.globalCompositeOperation = "source-over"; ox.globalAlpha = .5; ox.filter = "blur(3px)"; ox.drawImage(pc, 0, 0); ox.filter = "none"; ox.globalAlpha = 1;
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(oc, 0, 0); ctx.restore();
+  // paredes destacadas por cima da escuridão, só onde o jogador enxerga (ou já viu, mais apagadas)
+  const [wc, wx] = off("WL"); W(wx);
+  if (paintWallsPlayer(wx)) {
+    const [mc, mx] = off("WM"), dpr = devicePixelRatio || 1, bl = Math.max(3, G().size * .12 * cam.z * dpr);
+    if (exI && fog.exBox) { const [x0, y0, w, h] = fog.exBox; W(mx); mx.globalAlpha = .5; mx.drawImage(exI, x0, y0, w, h); mx.globalAlpha = 1; mx.setTransform(1, 0, 0, 1, 0, 0); }
+    mx.filter = `blur(${bl}px)`; for (let k = 0; k < 3; k++) mx.drawImage(U, 0, 0); mx.filter = "none";
+    wx.setTransform(1, 0, 0, 1, 0, 0); wx.globalCompositeOperation = "destination-in"; wx.drawImage(mc, 0, 0);
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(wc, 0, 0); ctx.restore();
+  }
 }
 function paintVisionGM(t){ // o mestre vê o alcance da visão (já cortado pelas paredes) tracejado
   const v = VI(t); if (!v) return;
@@ -606,11 +618,13 @@ function walkTo(t, P){
   const step = () => {
     const cur = tokens.find(x => x.id === t.id); if (!cur) { walking = null; return; }
     const [x, y] = t.sn === false ? cellCenter(...cells[i]) : snapPoint(...cellCenter(...cells[i]), cur.s || 1);
-    cur.x = x; cur.y = y; tokLive[cur.id] = {x, y}; send("tok", {id: cur.id, x: Math.round(x), y: Math.round(y), a: cur.a || 0, live: 1}); dirty = true;
+    const [px, py] = centers[i], [nx, ny] = centers[i + 1];   // vira para onde está andando
+    if (Math.hypot(nx - px, ny - py) > 1) cur.a = Math.round(((Math.atan2(nx - px, -(ny - py)) * 180 / Math.PI) + 360) % 360);
+    cur.x = x; cur.y = y; tokLive[cur.id] = {x, y, a: cur.a || 0}; send("tok", {id: cur.id, x: Math.round(x), y: Math.round(y), a: cur.a || 0, live: 1}); dirty = true;
     if (++i < cells.length) return setTimeout(step, 90);
     delete tokLive[cur.id]; walking = null; hoverCell = null;
-    if (isGM) { pushTrail(cur, centers); send("tok", {id: cur.id, x: cur.x, y: cur.y}); save("tokens"); }
-    else send("tokreq", {id: cur.id, x: cur.x, y: cur.y, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
+    if (isGM) { pushTrail(cur, centers); send("tok", {id: cur.id, x: cur.x, y: cur.y, a: cur.a || 0}); save("tokens"); }
+    else send("tokreq", {id: cur.id, x: cur.x, y: cur.y, a: cur.a || 0, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
   };
   step();
 }
@@ -665,7 +679,7 @@ function snapProp(t, x, y){
 }
 let propSigCur = "";
 function refreshBlock(){ // objetos que bloqueiam visão contam como parede
-  const sig = tokens.filter(t => isProp(t) && t.blk).map(t => `${t.id}${Math.round(t.x)},${Math.round(t.y)},${t.a || 0},${t.pw},${t.ph},${t.blk}`).join("|");
+  const sig = tokens.filter(t => isProp(t) && (t.blk || propSolid(t))).map(t => `${t.id}${Math.round(t.x)},${Math.round(t.y)},${t.a || 0},${t.pw},${t.ph},${t.blk},${propSolid(t)}`).join("|");
   if (sig !== propSigCur) { propSigCur = sig; wallsVer++; }
 }
 function propSegs(out){
@@ -747,26 +761,51 @@ function openPropPanel(t){
     <div class="lbl" style="margin-top:10px">✨ Emite luz</div>
     <div class="three"><label>Intensa <input type="number" id="oLb" min="0" step="0.5" value="${d.li?.rb || 0}"></label><label>Fraca <input type="number" id="oLd" min="0" step="0.5" value="${d.li?.rd || 0}"></label><label>Cor <input type="color" id="oLc" value="${esc(d.li?.c || "#ffbe5a")}"></label></div>
     <p class="hint" style="margin-top:2px">Em ${esc(G().unitName)}. 0 e 0 = não ilumina. Tocha: 6 e 12.</p>
-    <label class="chk" style="margin-top:10px"><input type="checkbox" id="oS" ${d.sn !== false ? "checked" : ""}> Agarrar ao grid</label>
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="oSo" ${propSolid({...d, h: false}) ? "checked" : ""}> Sólido (os jogadores não atravessam)</label>
+    <label class="chk"><input type="checkbox" id="oS" ${d.sn !== false ? "checked" : ""}> Agarrar ao grid</label>
     <label class="chk"><input type="checkbox" id="oHid" ${d.h ? "checked" : ""}> Oculto dos jogadores</label>
     <div class="acts foot"><button class="btn small" id="oDup">Duplicar</button><button class="btn small danger" id="oDel">Remover</button><span class="spacer"></span><button class="btn" id="oCancel">Cancelar</button><button class="btn primary" id="oSave">Ok</button></div></div>`;
   $("#pClose").onclick = $("#oCancel").onclick = closePanel;
   $("#oA").oninput = e => $("#oAv").textContent = e.target.value + "°";
   const cur = () => tokens.find(x => x.id === t.id);
-  $("#oSave").onclick = () => { const c = cur(); if (!c) return closePanel(); Object.assign(c, {n: $("#oN").value.trim(), pw: Math.max(1, Math.min(20, +$("#oW").value || 1)), ph: Math.max(1, Math.min(20, +$("#oH").value || 1)), a: +$("#oA").value, blk: $("#oB").value || null, img: $("#oI").value.trim() || c.img, sn: $("#oS").checked, h: $("#oHid").checked}); { const lb = Math.max(0, +$("#oLb").value || 0), ld = Math.max(0, +$("#oLd").value || 0); c.li = lb || ld ? {rb: lb, rd: ld, ang: 360, c: $("#oLc").value} : null; } const [x, y] = snapProp(c, c.x, c.y); c.x = x; c.y = y; save("tokens"); dirty = true; closePanel(); };
+  $("#oSave").onclick = () => { const c = cur(); if (!c) return closePanel(); Object.assign(c, {n: $("#oN").value.trim(), pw: Math.max(1, Math.min(20, +$("#oW").value || 1)), ph: Math.max(1, Math.min(20, +$("#oH").value || 1)), a: +$("#oA").value, blk: $("#oB").value || null, img: $("#oI").value.trim() || c.img, sn: $("#oS").checked, h: $("#oHid").checked, so: $("#oSo").checked ? 1 : 0}); { const lb = Math.max(0, +$("#oLb").value || 0), ld = Math.max(0, +$("#oLd").value || 0); c.li = lb || ld ? {rb: lb, rd: ld, ang: 360, c: $("#oLc").value} : null; } const [x, y] = snapProp(c, c.x, c.y); c.x = x; c.y = y; save("tokens"); dirty = true; closePanel(); };
   $("#oDel").onclick = () => { tokens = tokens.filter(x => x.id !== t.id); selTok = null; save("tokens"); dirty = true; closePanel(); };
   $("#oDup").onclick = () => { const c0 = cur(); if (!c0) return; const c = JSON.parse(JSON.stringify(c0)); c.id = uid(); c.x += G().size * (c.pw || 1); tokens.push(c); selTok = c.id; save("tokens"); dirty = true; closePanel(); };
 }
 
 // ---------- limites do mapa (imagem ou masmorra gerada) ----------
-function mapBox(){
+function mapBox(full){
   if (scene.bg) { const [w, h] = bgBox(); return [0, 0, w, h]; }
-  const g = scene.gen; if (g && g.w) return [g.x0 || 0, g.y0 || 0, g.w * g.s, g.h * g.s];
+  const g = scene.gen; if (g && g.w) { if (!full && g.bb) return [(g.x0 || 0) + g.bb[0] * g.s, (g.y0 || 0) + g.bb[1] * g.s, (g.bb[2] - g.bb[0]) * g.s, (g.bb[3] - g.bb[1]) * g.s]; return [g.x0 || 0, g.y0 || 0, g.w * g.s, g.h * g.s]; }
   return null;
 }
-function resetExplore(){ fog.exImg = null; fog.exBox = null; fog.ex = {}; exC = null; exReady = false; exImgSrc = null; }
+function resetExplore(){ fog.exImg = null; fog.exBox = null; fog.ex = {}; exC = null; exReady = false; exImgSrc = null; exPrevEl = null; clearTimeout(exT); }
+function freshDungeonTokens(){ // nova masmorra: só os personagens dos jogadores continuam (inimigos, NPCs e objetos da anterior saem)
+  tokLive = {}; rulers = {};
+  return tokens.filter(t => !isProp(t) && t.o).map(t => ({...t, tr: []}));
+}
 const hexA = (c, a) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(c || "")); if (!m) return `rgba(255,180,90,${a})`; const n = parseInt(m[1], 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 
+// ---------- jogadores abrem e fecham portas (perto do próprio personagem) ----------
+function doorAt(x, y){ const tol = Math.max(10 / cam.z, G().size * .22); let best = null, bd = tol; for (const w of walls()) { if (!w.d || w.s || !w.p) continue; const dd = distSeg(x, y, [w.p[0], w.p[1]], [w.p[2], w.p[3]]); if (dd < bd) { bd = dd; best = w; } } return best; }
+const doorMid = w => [(w.p[0] + w.p[2]) / 2, (w.p[1] + w.p[3]) / 2];
+const nearDoor = (t, w) => { const [mx, my] = doorMid(w); return Math.hypot(t.x - mx, t.y - my) <= G().size * 1.6 + tokR(t); };
+function playerDoor(w){
+  const mine = tokens.filter(t => !isProp(t) && owns(t) && nearDoor(t, w));
+  if (!mine.length) return toast("Chegue perto da porta para abrir.");
+  send("door", {k: w.p.join(","), who: myNick}); w.o = w.o ? 0 : 1; wallsVer++; losCache.clear(); dirty = true;
+  toast(w.o ? "Você abriu a porta." : "Você fechou a porta.", 1500);
+}
+// ---------- paredes que os jogadores enxergam (a escuridão esconde as que ainda não foram vistas) ----------
+function paintWallsPlayer(c, own){ // c já com a transformação do mundo
+  const ws = walls(); if (!ws.some(w => !w.d)) return false;
+  const th = Math.max(3 / cam.z, G().size * .09);
+  if (own) c.save(); c.lineCap = "round"; c.lineJoin = "round";
+  c.beginPath(); for (const w of ws) { if (w.d) continue; if (w.c) { c.moveTo(w.c[0] + w.r, w.c[1]); c.arc(w.c[0], w.c[1], w.r, 0, Math.PI * 2); } else if (w.p) { c.moveTo(w.p[0], w.p[1]); c.lineTo(w.p[2], w.p[3]); } }
+  c.strokeStyle = "rgba(0,0,0,.8)"; c.lineWidth = th + 4 / cam.z; c.stroke();
+  c.strokeStyle = "#efe2c4"; c.lineWidth = th; c.stroke();
+  if (own) c.restore(); return true;
+}
 // ---------- portas (todos veem as portas normais; as secretas só o mestre) ----------
 function paintDoors(){
   const th = Math.max(4, G().size * .17);
@@ -1019,6 +1058,8 @@ function renderGen(g, S, cvIn){
   const segs = [];
   for (let b = 0; b <= H; b++) for (let a = 0; a < W; a++) if (!!at(a, b - 1) !== !!at(a, b)) segs.push([a, b, a + 1, b, at(a, b) ? 1 : -1, 0]);
   for (let a = 0; a <= W; a++) for (let b = 0; b < H; b++) if (!!at(a - 1, b) !== !!at(a, b)) segs.push([a, b, a, b + 1, 0, at(a, b) ? 1 : -1]);
+  if (g.nx?.length) { const nx = new Set(g.nx); for (let i = segs.length - 1; i >= 0; i--) if (nx.has(segs[i].slice(0, 4).join(","))) segs.splice(i, 1); }
+  for (const s of g.iw || []) segs.push([s[0], s[1], s[2], s[3], 0, 0]);
   x.lineCap = "square";
   x.strokeStyle = "rgba(0,0,0,.35)"; x.lineWidth = S * .3; x.beginPath(); for (const [x1, y1, x2, y2, ny, nx] of segs) { const o = S * .18; x.moveTo(x1 * S + nx * o, y1 * S + ny * o); x.lineTo(x2 * S + nx * o, y2 * S + ny * o); } x.stroke();
   x.beginPath(); for (const s of segs) { x.moveTo(s[0] * S, s[1] * S); x.lineTo(s[2] * S, s[3] * S); }
@@ -1027,17 +1068,18 @@ function renderGen(g, S, cvIn){
 }
 function genCanvas(){
   const g = scene.gen; if (!g || !g.t) return null;
-  const S = Math.max(8, Math.min(48, g.s || 48)), sig = [g.style, g.w, g.h, S, g.t.length, g.t.slice(0, 40), g.seed].join("|");
-  if (genCache.sig !== sig) { genCache.sig = sig; genCache.cv = renderGen(g, S); }
+  const S = Math.max(8, Math.min(48, g.s || 48, 2800 / Math.max(g.w, g.h))), sig = [g.style, g.w, g.h, S, g.seed, g.ver || 0, JSON.stringify(g.iw || []), JSON.stringify(g.nx || [])].join("|");
+  if (genCache.sig !== sig || genCache.t !== g.t) { genCache.sig = sig; genCache.t = g.t; genCache.cv = renderGen(g, S); }   // compara o desenho inteiro, não só o começo
   return genCache.cv;
 }
 function applyGen(res, o){
   if (G().type === "hex") scene.grid = {...scene.grid, type: "square"};
   const S = G().size, gx = G().ox || 0, gy = G().oy || 0, P = (x, y) => [Math.round((gx + x * S) * 10) / 10, Math.round((gy + y * S) * 10) / 10];
   scene.walls = res.walls.map(s => ({p: [...P(s[0], s[1]), ...P(s[2], s[3])]})).concat(res.doors.map(d => ({p: [...P(d[0], d[1]), ...P(d[2], d[3])], d: 1, o: 0, ...(d[4] ? {s: 1} : {})})));
-  Object.assign(scene, {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, gen: {v: 1, style: res.style, w: res.w, h: res.h, t: res.t, x0: gx, y0: gy, s: S, seed: o.seed}});
+  Object.assign(scene, {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, roll: null, gen: {v: 1, style: res.style, w: res.w, h: res.h, t: res.t, x0: gx, y0: gy, s: S, seed: o.seed}});
   if (o.dark) scene.light = "dark";
-  const U = G().unit || 1, chars = tokens.filter(t => !isProp(t));
+  const U = G().unit || 1, chars = freshDungeonTokens();
+  drawings = drawings.filter(d => d.t !== "tpl"); save("drawings");
   const pr = res.props.map(p => { const a = ASSETS.find(x => x.id === p.id); if (!a) return null; const [x, y] = P(p.cx, p.cy);
     const t = {id: uid(), k: "prop", n: a.n, img: `/assets/${a.path || a.id + ".svg"}`, pw: a.w, ph: a.h, a: p.a || 0, blk: p.trap ? null : (a.blk || null), sn: true, x, y};
     if (p.h) t.h = true; if (a.li) t.li = {rb: a.li.b * U, rd: a.li.d * U, ang: 360, c: a.li.c}; return t; }).filter(Boolean);
@@ -1054,11 +1096,12 @@ function applyGen(res, o){
 }
 let genRes = null, genT = null;
 function openGenPanel(){
+  if (genOpt.style === "rolled") return openRollPanel();
   panelKind = "gen"; const o = genOpt, cave = o.style === "cave";
   const num = (id, label, v, min, max, unit = "") => `<label class="gnum"><span>${label}</span><input type="number" id="${id}" min="${min}" max="${max}" value="${v}">${unit ? `<small>${unit}</small>` : ""}</label>`;
   $("#panel").innerHTML = `<div class="panel gen-panel" role="dialog" aria-label="Gerador de masmorras"><h3>Gerador de masmorras <button class="btn small" id="pClose">Fechar</button></h3>
     <canvas id="genPrev" width="388" height="280" aria-label="Prévia da masmorra"></canvas>
-    <div class="seg" id="gStyle" style="margin:10px 0 4px"><button data-st="dungeon" aria-pressed="${!cave}">🏰 Masmorra</button><button data-st="cave" aria-pressed="${cave}">⛰ Caverna</button></div>
+    <div class="seg" id="gStyle" style="margin:10px 0 4px"><button data-st="dungeon" aria-pressed="${!cave}">🏰 Masmorra</button><button data-st="cave" aria-pressed="${cave}">⛰ Caverna</button><button data-st="rolled" title="Vai criando a masmorra enquanto os jogadores exploram">🎲 Rolada</button></div>
     <div class="ggrid">
       ${num("gW", "Largura", o.w, 16, 120, "casas")}${num("gH", "Altura", o.h, 12, 120, "casas")}
       ${cave ? "" : num("gRooms", "Salas", o.rooms, 2, 40) + num("gCw", "Corredor", o.cw, 1, 3, "casas") + num("gMin", "Sala mín.", o.rmin, 2, 12) + num("gMax", "Sala máx.", o.rmax, 3, 20) + num("gDoors", "Portas", o.doors, 0, 100, "%") + num("gSecret", "Passagens secretas", o.secret, 0, 6) + num("gDead", "Becos sem saída", o.dead, 0, 12)}
@@ -1104,6 +1147,293 @@ function runGen(){
   $("#gInfo").innerHTML = genRes.style === "cave" ? `Caverna ${genRes.w}×${genRes.h} · ${genRes.props.length} objetos` : `${genRes.rooms.length} salas · ${nD} portas${nS ? ` · ${nS} secreta${nS > 1 ? "s" : ""} <span style="color:#c07ae8">(roxas)</span>` : ""} · ${genRes.props.length} objetos`;
 }
 
+// ---------- masmorra rolada: vai sendo criada enquanto os jogadores exploram ----------
+const RT_CONTENT = [[3, "corredor", "Corredor"], [7, "vazia", "Sala vazia"], [10, "obst", "Sala com obstáculo"], [13, "armad", "Armadilha"], [16, "inim", "Inimigos"], [18, "npc", "NPC"], [19, "tesouro", "Tesouro"], [20, "evento", "Evento especial"]];
+const RT_SHAPES = ["Pequena quadrada", "Grande quadrada", "Retangular", "Circular", "Octogonal", "Longa e estreita", "Sala em L", "Sala com pilares", "Sala com desnível", "Sala dividida em duas partes", "Sala irregular", "Câmara enorme"];
+const RT_ENC = [[4, "1–2 inimigos fracos"], [8, "Grupo de inimigos"], [11, "Inimigos + armadilha"], [14, "Monstro forte"], [16, "Grupo + líder"], [18, "Monstro especial"], [19, "Mini-chefe"], [20, "Encontro mortal / chefe"]];
+const RT_TRE = [[5, "Nada"], [10, "Moedas"], [14, "Poção / consumível"], [17, "Item mágico comum"], [19, "Item mágico incomum"], [20, "Item especial + moedas"]];
+const RT_TRAPS = ["Placa de pressão que dispara dardos", "Fosso escondido sob lajotas soltas", "Lâmina pendular no teto", "Gás venenoso ao abrir a porta", "Parte do teto desaba", "Runa que explode em chamas", "Rede que cai do teto"];
+const RT_NPC = ["Prisioneiro acorrentado pedindo ajuda", "Aventureiro perdido e ferido", "Goblin que quer negociar", "Ermitão louco que sabe um segredo", "Fantasma de um antigo guarda", "Mercador escondido com itens raros", "Criança perdida (ou será uma ilusão?)"];
+const RT_EVENT = ["Um altar pulsa com energia estranha", "Uma voz ecoa pelas paredes pedindo ajuda", "O chão treme e parte do teto desaba", "Uma estátua fala um enigma", "Um portal cintila por alguns segundos", "Um espírito aparece e oferece um acordo", "As tochas se apagam todas de uma vez", "Uma inscrição antiga revela parte do mapa"];
+const RT_OBST = ["Escombros bloqueiam parte da sala", "Um buraco profundo no meio do caminho", "Água até a cintura cobre o chão", "Estalagmites afiadas por toda parte", "Uma jaula enorme ocupa a sala"];
+const rd = n => 1 + Math.floor(Math.random() * n);
+const lookup = (T, r) => T.find(x => r <= x[0]);
+const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]], DIRN = ["norte", "leste", "sul", "oeste"];
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+let rollSel = null, rollLast = null;
+const rollChoice = {content: "roll", shape: "roll", exits: "roll"};
+function shapeMask(k, dir){
+  const m = [], meta = {pil: [], iw: [], idr: [], st: []}; let w = 0, h = 0;
+  const rect = (W, H) => { w = W; h = H; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) m.push([x, y]); };
+  const vert = dir % 2 === 0;
+  switch (k) {
+    case 0: rect(4, 4); break;
+    case 1: rect(7, 7); break;
+    case 2: Math.random() < .5 ? rect(5, 8) : rect(8, 5); break;
+    case 3: w = h = 8; for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if (Math.hypot(x + .5 - 4, y + .5 - 4) <= 4.05) m.push([x, y]); break;
+    case 4: w = h = 8; for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if (Math.min(x, 7 - x) + Math.min(y, 7 - y) >= 2) m.push([x, y]); break;
+    case 5: vert ? rect(2, 10) : rect(10, 2); break;
+    case 6: { rect(8, 8); const qx = Math.random() < .5 ? 0 : 4, qy = Math.random() < .5 ? 0 : 4; for (let i = m.length - 1; i >= 0; i--) { const [x, y] = m[i]; if (x >= qx && x < qx + 4 && y >= qy && y < qy + 4) m.splice(i, 1); } break; }
+    case 7: rect(8, 8); meta.pil = [[2, 2], [5, 2], [2, 5], [5, 5]]; break;
+    case 8: if (vert) { rect(7, 8); meta.st = [[1, 3, 0], [3, 3, 0], [5, 3, 0]]; } else { rect(8, 7); meta.st = [[3, 1, 90], [3, 3, 90], [3, 5, 90]]; } break;
+    case 9: { if (vert) { rect(6, 9); const g = 1 + Math.floor(Math.random() * 4); meta.iw = [[0, 4, g, 4], [g + 1, 4, 6, 4]]; meta.idr = [[g, 4, g + 1, 4]]; } else { rect(9, 6); const g = 1 + Math.floor(Math.random() * 4); meta.iw = [[4, 0, 4, g], [4, g + 1, 4, 6]]; meta.idr = [[4, g, 4, g + 1]]; } break; }
+    case 10: { w = h = 9; const S = new Set(["4,4"]), fr = [[4, 4]]; while (S.size < 40) { const [x, y] = fr[Math.floor(Math.random() * fr.length)], [dx, dy] = DIRS[Math.floor(Math.random() * 4)], nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx > 8 || ny > 8 || S.has(nx + "," + ny)) continue; S.add(nx + "," + ny); fr.push([nx, ny]); } for (const k2 of S) m.push(k2.split(",").map(Number)); break; }
+    case 11: rect(12, 12); break;
+  }
+  return {w, h, m, meta};
+}
+function rollEdge(c, dd){ const [x, y] = c; return dd === 0 ? [x, y, x + 1, y] : dd === 1 ? [x + 1, y, x + 1, y + 1] : dd === 2 ? [x, y + 1, x + 1, y + 1] : [x, y, x, y + 1]; }
+function rollRebuild(){ // paredes, portas e o desenho do chão a partir do estado da masmorra rolada
+  const R = scene.roll, W = R.w, H = R.h, A = R.a, at = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : A[y * W + x];
+  const ek = e => e.join(","), skip = new Set(), prevDoor = new Map();
+  for (const w of walls()) if (w.g && w.d) prevDoor.set(w.p.join(","), w.o);
+  for (const e of R.ex) if (e.st !== "blocked") skip.add(ek(rollEdge(e.c, e.d)));
+  const segs = [];
+  for (let y = 0; y <= H; y++) for (let x = 0; x < W; x++) if (at(x, y - 1) !== at(x, y) && !skip.has(ek([x, y, x + 1, y]))) segs.push([x, y, x + 1, y]);
+  for (let x = 0; x <= W; x++) for (let y = 0; y < H; y++) if (at(x - 1, y) !== at(x, y) && !skip.has(ek([x, y, x, y + 1]))) segs.push([x, y, x, y + 1]);
+  const g = scene.gen, P = (x, y) => [Math.round((g.x0 + x * g.s) * 10) / 10, Math.round((g.y0 + y * g.s) * 10) / 10], PP = s => [...P(s[0], s[1]), ...P(s[2], s[3])];
+  const out = walls().filter(w => !w.g);
+  for (const s of mergeSegs(segs).concat(R.iw)) out.push({p: PP(s), g: 1});
+  const door = (s, extra) => { const p = PP(s), o = prevDoor.get(p.join(",")); out.push({p, d: 1, o: o ? 1 : 0, g: 1, ...extra}); };
+  for (const e of R.ex) { if (e.st === "blocked") continue; const s = rollEdge(e.c, e.d); if (e.t === "door") door(s); else if (e.st === "new") out.push({p: PP(s), d: 1, o: 0, s: 1, g: 1}); }
+  for (const s of R.idr) door(s);
+  scene.walls = out;
+  let t = "", bb = [W, H, 0, 0];
+  for (let i = 0; i < W * H; i++) { const a = A[i]; t += a ? (R.areas[a - 1]?.k === "corredor" ? 2 : 1) : 0; if (a) { const x = i % W, y = (i / W) | 0; bb = [Math.min(bb[0], x), Math.min(bb[1], y), Math.max(bb[2], x + 1), Math.max(bb[3], y + 1)]; } }
+  g.t = t; g.iw = R.iw; g.nx = R.ex.filter(e => e.t === "open" && e.st === "new").map(e => ek(rollEdge(e.c, e.d)));
+  g.bb = [Math.max(0, bb[0] - 3), Math.max(0, bb[1] - 3), Math.min(W, bb[2] + 3), Math.min(H, bb[3] + 3)]; g.ver = (g.ver || 0) + 1;
+  wallsVer++; losCache.clear();
+}
+function rollFits(R, cells, keep){ // cabe sem encostar em outras áreas? (keep = célula grudada na porta de origem)
+  const W = R.w, H = R.h, set = new Set(cells.map(c => c[0] + "," + c[1]));
+  for (const [x, y] of cells) {
+    if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || R.a[y * W + x]) return false;
+    if (keep && x === keep[0] && y === keep[1]) continue;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = x + dx, ny = y + dy; if (R.a[ny * W + nx] && !set.has(nx + "," + ny)) return false; }
+  }
+  return true;
+}
+function rollExits(R, cells, n, backDir, type, avoid){
+  const W = R.w, H = R.h, set = new Set(cells.map(c => c[0] + "," + c[1])), free = (x, y) => x >= 1 && y >= 1 && x < W - 1 && y < H - 1 && !R.a[y * W + x] && !set.has(x + "," + y);
+  const cand = [];
+  for (const c of cells) {
+    if (avoid?.has(c[0] + "," + c[1])) continue;
+    for (let dd = 0; dd < 4; dd++) {
+      const [dx, dy] = DIRS[dd]; if (set.has((c[0] + dx) + "," + (c[1] + dy))) continue;
+      let ok = true; for (let k = 1; k <= 4 && ok; k++) { const x = c[0] + dx * k, y = c[1] + dy * k; if (!free(x, y) || (k <= 2 && (!free(x + dy, y + dx) || !free(x - dy, y - dx)))) ok = false; }
+      if (ok) cand.push({c, d: dd});
+    }
+  }
+  shuffle(cand).sort((a, b) => (a.d === backDir) - (b.d === backDir));
+  const out = [];
+  for (const e of cand) { if (out.length >= n) break; if (out.some(o => Math.abs(o.c[0] - e.c[0]) + Math.abs(o.c[1] - e.c[1]) < 3 || (o.d === e.d && Math.abs(o.c[0] - e.c[0]) + Math.abs(o.c[1] - e.c[1]) < 4))) continue; out.push(e); }
+  return out.map(e => ({id: ++R.eid, a: 0, c: e.c, d: e.d, t: type, st: "new"}));
+}
+function rollPropAt(id, x, y, rot = 0, extra = {}){
+  const a = ASSETS.find(q => q.id === id); if (!a) return null;
+  const sw = rot % 180 ? a.h : a.w, sh = rot % 180 ? a.w : a.h, g = scene.gen, U = G().unit || 1;
+  const t = {id: uid(), k: "prop", n: a.n, img: `/assets/${a.path || a.id + ".svg"}`, pw: a.w, ph: a.h, a: rot, blk: extra.trap ? null : (a.blk || null), sn: true, x: g.x0 + (x + sw / 2) * g.s, y: g.y0 + (y + sh / 2) * g.s};
+  if (extra.h) t.h = true; if (a.li) t.li = {rb: a.li.b * U, rd: a.li.d * U, ang: 360, c: a.li.c};
+  tokens.push(t); return t;
+}
+function rollFill(R, area, cells, busy){ // ajudantes de posicionamento dentro de uma área
+  const set = new Set(cells.map(c => c[0] + "," + c[1]));
+  const fits = (x, y, w, h) => { for (let b = y; b < y + h; b++) for (let a = x; a < x + w; a++) if (!set.has(a + "," + b) || busy.has(a + "," + b)) return false; return true; };
+  const mark = (x, y, w, h) => { for (let b = y; b < y + h; b++) for (let a = x; a < x + w; a++) busy.add(a + "," + b); };
+  const prop = (id, extra = {}) => { const a = ASSETS.find(q => q.id === id); if (!a) return null; for (let k = 0; k < 60; k++) { const rot = a.w === a.h ? [0, 90, 180, 270][rd(4) - 1] : [0, 90][rd(2) - 1], sw = rot % 180 ? a.h : a.w, sh = rot % 180 ? a.w : a.h, [x, y] = cells[Math.floor(Math.random() * cells.length)]; if (fits(x, y, sw, sh)) { mark(x, y, sw, sh); return rollPropAt(id, x, y, rot, extra); } } return null; };
+  const tok = (n, c, s = 1) => { const g = scene.gen; for (let k = 0; k < 80; k++) { const [x, y] = cells[Math.floor(Math.random() * cells.length)]; if (fits(x, y, s, s)) { mark(x, y, s, s); const t = {id: uid(), n, c, s, x: g.x0 + (x + s / 2) * g.s, y: g.y0 + (y + s / 2) * g.s, a: 180, h: true, sn: true}; tokens.push(t); return t; } } return null; };
+  const torch = () => { // tocha na parede
+    const opts = []; for (const [x, y] of cells) for (let dd = 0; dd < 4; dd++) { const nx = x + DIRS[dd][0], ny = y + DIRS[dd][1]; if (!set.has(nx + "," + ny) && !R.ex.some(e => e.c[0] === x && e.c[1] === y && e.d === dd) && !busy.has(x + "," + y)) opts.push([x, y, [0, 90, 180, 270][dd]]); }
+    const o = opts[Math.floor(Math.random() * opts.length)]; if (o) { busy.add(o[0] + "," + o[1]); rollPropAt("tocha-parede", o[0], o[1], o[2]); }
+  };
+  return {prop, tok, torch, mark, fits};
+}
+function rollContent(R, area, cells, kind, busy, lines){
+  const F = rollFill(R, area, cells, busy), pick = a => a[Math.floor(Math.random() * a.length)];
+  const traps = n => { for (let i = 0; i < n; i++) F.prop(pick(["espinhos", "alcapao", "buraco", "grade-chao"]), {h: 1, trap: 1}); };
+  if (kind === "vazia") { if (Math.random() < .6) F.prop(pick(["ossos", "sangue", "escombros", "galhos", "cranios"])); }
+  else if (kind === "obst") { const o = pick(RT_OBST); lines.push("🧱 " + o); const ids = {"Escombros bloqueiam parte da sala": ["escombros", "escombros", "pilar-quebrado"], "Um buraco profundo no meio do caminho": ["buraco", "buraco"], "Água até a cintura cobre o chão": ["agua-rasa", "agua-rasa", "agua-rasa"], "Estalagmites afiadas por toda parte": ["estalagmites", "estalagmites", "estalagmites", "estalagmites"], "Uma jaula enorme ocupa a sala": ["jaula", "grilhoes"]}[o]; for (const id of ids) F.prop(id); }
+  else if (kind === "armad") { const t = pick(RT_TRAPS); lines.push("⚠️ " + t + " (oculta)"); traps(rd(2)); }
+  else if (kind === "inim") {
+    const r = rd(20), row = lookup(RT_ENC, r); lines.push(`👹 Encontro — 1d20 = ${r} → <b>${row[1]}</b>`);
+    const add = (n, nm, c, s = 1) => { for (let i = 0; i < n; i++) F.tok(nm, c, s); };
+    if (r <= 4) add(rd(2), "Inimigo fraco", "#7a5a3a");
+    else if (r <= 8) add(2 + rd(3), "Inimigo", "#8a3a2a");
+    else if (r <= 11) { add(1 + rd(2), "Inimigo", "#8a3a2a"); traps(1); }
+    else if (r <= 14) add(1, "Monstro forte", "#8a1f2a", 2);
+    else if (r <= 16) { add(2 + rd(2), "Inimigo", "#8a3a2a"); add(1, "Líder", "#b0202a"); }
+    else if (r <= 18) add(1, "Monstro especial", "#6a3a8a", 2);
+    else if (r === 19) { add(1, "Mini-chefe", "#a0202a", 2); add(2, "Lacaio", "#7a5a3a"); }
+    else add(1, "Chefe", "#5a0010", 3);
+    lines.push("Tokens ocultos na sala: troque o nome e a imagem pelos monstros certos para o nível do grupo e desoculte quando aparecerem.");
+  }
+  else if (kind === "npc") { lines.push("🧑 " + pick(RT_NPC)); F.tok("NPC", "#5f9a4a"); }
+  else if (kind === "tesouro") {
+    const r = rd(20), row = lookup(RT_TRE, r); lines.push(`💰 Tesouro — 1d20 = ${r} → <b>${row[1]}</b>`);
+    if (r <= 5) F.prop("bau-aberto"); else if (r <= 10) F.prop("ouro"); else if (r <= 14) F.prop("pocoes"); else if (r <= 17) F.prop("bau"); else if (r <= 19) { F.prop("pedestal"); F.prop("bau"); } else { F.prop("bau-aberto"); F.prop("ouro"); F.prop("pedestal"); }
+  }
+  else if (kind === "evento") { const ev = pick(RT_EVENT); lines.push("✨ " + ev); F.prop(pick(["altar", "circulo-ritual", "pedestal", "estatua", "cristais"])); }
+  return F;
+}
+function rollStart(){
+  if ((scene.bg || walls().length || tokens.some(isProp)) && !confirm("Começar uma masmorra rolada? O mapa atual (imagem, paredes e objetos) vai ser trocado. Ctrl+Z desfaz.")) return;
+  if (G().type === "hex") scene.grid = {...scene.grid, type: "square"};
+  const W = 90, H = 70, R = {w: W, h: H, a: new Array(W * H).fill(0), areas: [], ex: [], iw: [], idr: [], log: [], eid: 0};
+  Object.assign(scene, {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, roll: R, gen: {v: 2, rolled: 1, style: "dungeon", w: W, h: H, t: "", x0: G().ox || 0, y0: G().oy || 0, s: G().size, seed: Date.now() % 1e6}});
+  if (genOpt.dark) scene.light = "dark";
+  const chars = freshDungeonTokens(); tokens = chars; scene.walls = []; drawings = drawings.filter(d => d.t !== "tpl"); save("drawings");
+  const x0 = 42, y0 = 32, cells = []; for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) cells.push([x0 + x, y0 + y]);
+  const area = {id: 1, k: "entrada", nm: "Entrada", shape: "Entrada", c: [x0 + 2.5, y0 + 2.5], txt: []};
+  R.areas.push(area); for (const [x, y] of cells) R.a[y * W + x] = 1;
+  const n = rd(4), ex = rollExits(R, cells, n, -1, "door"); ex.forEach(e => e.a = 1); R.ex.push(...ex);
+  const busy = new Set(), F = rollFill(R, area, cells, busy);
+  rollPropAt("escada-sobe", x0 + 2, y0 + 1); F.mark(x0 + 2, y0 + 1, 1, 2);
+  if (genOpt.torches) { F.torch(); F.torch(); }
+  const g = scene.gen; chars.forEach((t, i) => { const c = cells.filter(([x, y]) => !busy.has(x + "," + y))[i] || cells[0]; t.x = g.x0 + (c[0] + .5) * g.s; t.y = g.y0 + (c[1] + .5) * g.s; t.tr = []; });
+  area.txt.push(`🚪 1d4 = ${n} → ${ex.length} saída${ex.length > 1 ? "s" : ""}`);
+  R.log.push({a: 1, h: "Entrada", l: area.txt.slice()});
+  rollLast = {h: "Entrada", l: area.txt.slice()};
+  rollRebuild(); resetExplore(); selTok = null;
+  save("scene"); save("tokens"); save("fog", false);
+  dirty = true; drawTop(); drawEmpty(); fit(); openRollPanel();
+}
+function rollStep(exId){
+  const R = scene.roll, e = R?.ex.find(x => x.id === exId && x.st === "new"); if (!e) return;
+  const lines = [], W = R.w;
+  // 1) conteúdo
+  let kind = rollChoice.content, kname;
+  if (kind === "roll") { const r = rd(20), row = lookup(RT_CONTENT, r); kind = row[1]; kname = row[2]; lines.push(`🎲 Sala — 1d20 = ${r} → <b>${kname}</b>`); }
+  else { kname = RT_CONTENT.find(x => x[1] === kind)[2]; lines.push(`Escolhido: <b>${kname}</b>`); }
+  // 2) formato e 3) saídas
+  let shapeI = null;
+  if (kind !== "corredor") { if (rollChoice.shape === "roll") { const r = rd(12); shapeI = r - 1; lines.push(`📐 Formato — 1d12 = ${r} → <b>${RT_SHAPES[shapeI]}</b>`); } else { shapeI = +rollChoice.shape; lines.push(`📐 Formato: <b>${RT_SHAPES[shapeI]}</b>`); } }
+  let nEx; if (rollChoice.exits === "roll") { nEx = rd(4); lines.push(`🚪 Saídas — 1d4 = ${nEx}`); } else { nEx = +rollChoice.exits; lines.push(`🚪 Saídas: ${nEx}`); }
+  const [dx, dy] = DIRS[e.d], O = [e.c[0] + dx, e.c[1] + dy];
+  let cells = null, meta = null, conn = [];
+  if (kind === "corredor") {
+    for (let L = 4 + rd(3); L >= 2 && !cells; L--) { const cs = []; for (let k = 0; k < L; k++) cs.push([O[0] + dx * k, O[1] + dy * k]); if (rollFits(R, cs, O)) cells = cs; }
+  } else {
+    const tryShape = (si, cl) => {
+      const sm = shapeMask(si, e.d), set = new Set(sm.m.map(c => c[0] + "," + c[1]));
+      const conn0 = []; for (let k = 0; k < cl; k++) conn0.push([O[0] + dx * k, O[1] + dy * k]);
+      const E = [O[0] + dx * cl, O[1] + dy * cl];
+      for (const mc of shuffle(sm.m.filter(([x, y]) => !set.has((x - dx) + "," + (y - dy))))) {
+        const ox = E[0] - mc[0], oy = E[1] - mc[1], cs = sm.m.map(([x, y]) => [x + ox, y + oy]);
+        if (rollFits(R, conn0.concat(cs), O)) { meta = {...sm.meta, ox, oy}; conn = conn0; return cs; }
+      }
+      return null;
+    };
+    for (const cl of [2, 1, 3, 4]) { cells = tryShape(shapeI, cl); if (cells) break; }
+    if (!cells) for (const cl of [2, 1, 3]) { cells = tryShape(0, cl); if (cells) { lines.push("(não coube: virou uma sala pequena)"); shapeI = 0; break; } }
+  }
+  if (!cells && kind !== "corredor") { // nem sala pequena coube: vira um corredor
+    for (let L = 5; L >= 2 && !cells; L--) { const cs = []; for (let k = 0; k < L; k++) cs.push([O[0] + dx * k, O[1] + dy * k]); if (rollFits(R, cs, O)) cells = cs; }
+    if (cells) { kind = "corredor"; kname = "Corredor"; meta = null; conn = []; lines.push("(não coube uma sala aqui: virou um corredor)"); }
+  }
+  if (!cells) {
+    e.st = "blocked"; lines.push("🪨 Não há espaço: o caminho está <b>bloqueado por um desabamento</b>.");
+    R.log.push({a: e.a, h: "Desabamento", l: lines}); rollLast = {h: "Caminho bloqueado", l: lines};
+    rollRebuild(); save("scene"); dirty = true; openRollPanel(); return;
+  }
+  const id = R.areas.length + 1, isCorr = kind === "corredor";
+  const nm = isCorr ? `Corredor ${R.areas.filter(a => a.k === "corredor").length + 1}` : `Sala ${R.areas.filter(a => a.k !== "corredor" && a.k !== "entrada").length + 1}`;
+  const all = conn.concat(cells), area = {id, k: isCorr ? "corredor" : kind, nm, shape: isCorr ? "Corredor" : RT_SHAPES[shapeI], c: [all.reduce((s, c) => s + c[0], 0) / all.length + .5, all.reduce((s, c) => s + c[1], 0) / all.length + .5], txt: []};
+  R.areas.push(area); for (const [x, y] of all) R.a[y * W + x] = id;
+  e.st = "done"; e.to = id;
+  // saídas novas
+  let ex;
+  if (isCorr) {
+    const last = cells[cells.length - 1], first = rollExits(R, [last], 1, (e.d + 2) % 4, "open").filter(x => x.d === e.d);
+    const side = nEx > 1 ? rollExits(R, cells.slice(1), nEx - 1, (e.d + 2) % 4, "open").filter(x => x.d !== e.d) : [];
+    ex = first.concat(side).slice(0, nEx);
+    if (!ex.length) ex = rollExits(R, all, 1, (e.d + 2) % 4, "open");
+  } else ex = rollExits(R, cells, nEx, (e.d + 2) % 4, "door", new Set(conn.map(c => c[0] + "," + c[1])));
+  ex.forEach(x => x.a = id); R.ex.push(...ex);
+  if (ex.length < nEx) lines.push(`(só couberam ${ex.length} saída${ex.length === 1 ? "" : "s"})`);
+  // formato especial: pilares, desnível, divisória
+  const busy = new Set(conn.map(c => c[0] + "," + c[1]));
+  if (meta) {
+    for (const [x, y] of meta.pil) { rollPropAt("coluna", x + meta.ox, y + meta.oy); busy.add((x + meta.ox) + "," + (y + meta.oy)); }
+    for (const [x, y, rot] of meta.st) { rollPropAt("escada", x + meta.ox, y + meta.oy, rot); const w = rot ? 2 : 1, h = rot ? 1 : 2; for (let b = 0; b < h; b++) for (let a = 0; a < w; a++) busy.add((x + meta.ox + a) + "," + (y + meta.oy + b)); }
+    for (const s of meta.iw) R.iw.push([s[0] + meta.ox, s[1] + meta.oy, s[2] + meta.ox, s[3] + meta.oy]);
+    for (const s of meta.idr) R.idr.push([s[0] + meta.ox, s[1] + meta.oy, s[2] + meta.ox, s[3] + meta.oy]);
+    // não deixa objeto na frente das saídas
+    for (const x of ex) busy.add(x.c[0] + "," + x.c[1]);
+    if (meta.idr.length) for (const s of R.idr.slice(-meta.idr.length)) { busy.add(s[0] + "," + s[1]); busy.add((s[0] - (s[1] === s[3] ? 0 : 1)) + "," + (s[1] - (s[1] === s[3] ? 1 : 0))); }
+  }
+  if (isCorr) { if (kind === "corredor" && Math.random() < .15) { const F = rollFill(R, area, cells, busy); F.prop(["espinhos", "alcapao"][rd(2) - 1], {h: 1, trap: 1}); lines.push("⚠️ Armadilha escondida no corredor"); } }
+  else {
+    const F = rollContent(R, area, cells, kind, busy, lines);
+    if (genOpt.torches && kind !== "vazia") { F.torch(); if (cells.length > 40) F.torch(); }
+  }
+  area.txt = lines.slice();
+  R.log.push({a: id, h: `${nm} · ${isCorr ? "Corredor" : kname}${isCorr ? "" : " · " + RT_SHAPES[shapeI]}`, l: lines});
+  rollLast = {h: `${nm}${isCorr ? "" : " — " + kname}`, l: lines, a: id};
+  rollRebuild(); save("scene"); save("tokens"); dirty = true;
+  const nxt = R.ex.filter(x => x.st === "new"); rollSel = ex[0]?.id || nxt[0]?.id || null;
+  openRollPanel();
+  toast(e.t === "door" ? "Área criada. Clique na porta para abrir quando entrarem." : "Área criada.");
+}
+function rollExitPos(e){ const g = scene.gen, [dx, dy] = DIRS[e.d]; return [g.x0 + (e.c[0] + .5 + dx * .95) * g.s, g.y0 + (e.c[1] + .5 + dy * .95) * g.s]; }
+function rollExitAt(wx, wy){ const R = scene.roll; if (!R || !scene.gen) return null; const r = scene.gen.s * .38; return R.ex.find(e => e.st === "new" && Math.hypot(...(([x, y]) => [x - wx, y - wy])(rollExitPos(e))) <= r) || null; }
+function paintRollGM(){ // só o mestre: número das salas e as saídas ainda não roladas
+  const R = scene.roll, g = scene.gen; if (!isGM || !R || !g) return;
+  ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const fs = Math.max(11 / cam.z, g.s * .3);
+  for (const a of R.areas) { if (a.k === "corredor") continue; const x = g.x0 + a.c[0] * g.s, y = g.y0 + a.c[1] * g.s; ctx.font = `700 ${fs}px "Alegreya Sans", sans-serif`; const txt = a.nm + (a.k !== "entrada" && a.k !== "vazia" ? " · " + (RT_CONTENT.find(r => r[1] === a.k)?.[2] || "") : ""); const w = ctx.measureText(txt).width + fs; ctx.fillStyle = "rgba(20,16,12,.72)"; ctx.fillRect(x - w / 2, y - fs * .75, w, fs * 1.5); ctx.fillStyle = "#e8c77a"; ctx.fillText(txt, x, y); }
+  for (const e of R.ex) {
+    if (e.st !== "new") continue; const [x, y] = rollExitPos(e), r = g.s * .32, on = e.id === rollSel && panelKind === "gen";
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = on ? "#ffe28a" : "#d0a54c"; ctx.fill(); ctx.lineWidth = 2 / cam.z; ctx.strokeStyle = "#2a1a08"; ctx.stroke();
+    ctx.fillStyle = "#1c150c"; ctx.font = `800 ${r * 1.3}px "Alegreya Sans", sans-serif`; ctx.fillText("?", x, y + r * .05);
+  }
+  ctx.restore();
+}
+function openRollPanel(){
+  panelKind = "gen"; const R = scene.roll, open = R ? R.ex.filter(e => e.st === "new") : [];
+  if (!open.some(e => e.id === rollSel)) rollSel = open[0]?.id ?? null;
+  const areaNm = id => R.areas[id - 1]?.nm || "?";
+  const exNm = e => `${areaNm(e.a)} · ${e.t === "door" ? "porta" : "passagem"} ${DIRN[e.d]}`;
+  const sel = (id, label, opts, v) => `<label class="gnum rsel"><span>${label}</span><select id="${id}">${opts.map(([k, l]) => `<option value="${k}" ${String(v) === String(k) ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
+  const tables = `<details class="rtab"><summary>📜 Tabelas</summary>
+    <b>O que existe? — 1d20</b><table>${RT_CONTENT.map((r, i) => `<tr><td>${(i ? RT_CONTENT[i - 1][0] + 1 : 1)}${r[0] > (i ? RT_CONTENT[i - 1][0] + 1 : 1) ? "–" + r[0] : ""}</td><td>${r[2]}</td></tr>`).join("")}</table>
+    <b>Formato — 1d12</b><table>${RT_SHAPES.map((s, i) => `<tr><td>${i + 1}</td><td>${s}</td></tr>`).join("")}</table>
+    <b>Saídas — 1d4</b><p>1 a 4 saídas (além da porta por onde entraram)</p>
+    <b>Encontro — 1d20</b><table>${RT_ENC.map((r, i) => `<tr><td>${(i ? RT_ENC[i - 1][0] + 1 : 1)}${r[0] > (i ? RT_ENC[i - 1][0] + 1 : 1) ? "–" + r[0] : ""}</td><td>${r[1]}</td></tr>`).join("")}</table>
+    <b>Tesouro — 1d20</b><table>${RT_TRE.map((r, i) => `<tr><td>${(i ? RT_TRE[i - 1][0] + 1 : 1)}${r[0] > (i ? RT_TRE[i - 1][0] + 1 : 1) ? "–" + r[0] : ""}</td><td>${r[1]}</td></tr>`).join("")}</table></details>`;
+  $("#panel").innerHTML = `<div class="panel gen-panel" role="dialog" aria-label="Masmorra rolada"><h3>Gerador de masmorras <button class="btn small" id="pClose">Fechar</button></h3>
+    <div class="seg" id="gStyle" style="margin:0 0 10px"><button data-st="dungeon">🏰 Masmorra</button><button data-st="cave">⛰ Caverna</button><button data-st="rolled" aria-pressed="true">🎲 Rolada</button></div>
+    ${!R ? `<p class="hint" style="font-size:14px">A masmorra vai sendo criada <b>enquanto os jogadores exploram</b>. Você começa só com a entrada. Quando o grupo chega numa porta ou passagem ainda não rolada (o <b style="color:var(--brass)">?</b> dourado, só você vê), clique nela e role: o que existe na sala (1d20), o formato (1d12) e as saídas (1d4). Se sair inimigo ou tesouro, rola a tabela deles também. A sala aparece desenhada, com paredes, portas e objetos.</p>
+      <label class="chk"><input type="checkbox" id="gTorch" ${genOpt.torches ? "checked" : ""}> Tochas nas paredes (iluminam)</label>
+      <label class="chk"><input type="checkbox" id="gDark" ${genOpt.dark ? "checked" : ""}> Começar no escuro (só vê quem tem luz)</label>
+      <div class="acts foot"><span class="spacer"></span><button class="btn primary" id="rStart">▶ Começar pela entrada</button></div>`
+    : `${rollLast ? `<div class="rlast"><b>${rollLast.h}</b>${rollLast.l.map(l => `<div>${l}</div>`).join("")}</div>` : ""}
+      <div class="lbl">Saídas sem explorar <small>(${open.length})</small></div>
+      <div class="rexits">${open.map(e => `<button class="rex" data-rex="${e.id}" aria-pressed="${e.id === rollSel}"><span>?</span>${esc(exNm(e))}</button>`).join("") || `<p class="hint">Nenhuma. A masmorra acabou (ou recomece).</p>`}</div>
+      ${open.length ? `<div class="ggrid" style="margin-top:8px">
+        ${sel("rC", "Conteúdo", [["roll", "🎲 Rolar 1d20"], ...RT_CONTENT.map(r => [r[1], r[2]])], rollChoice.content)}
+        ${sel("rS", "Formato", [["roll", "🎲 Rolar 1d12"], ...RT_SHAPES.map((s, i) => [i, s])], rollChoice.shape)}
+        ${sel("rE", "Saídas", [["roll", "🎲 Rolar 1d4"], [1, "1"], [2, "2"], [3, "3"], [4, "4"]], rollChoice.exits)}
+      </div>
+      <div class="acts foot"><button class="btn small" id="rGo" title="Mostrar essa saída no mapa">👁 Ver</button><span class="spacer"></span><button class="btn primary" id="rRoll">🎲 Rolar e criar a área</button></div>` : ""}
+      <div class="lbl" style="margin-top:12px">Diário da masmorra</div>
+      <div class="rlog">${R.log.slice().reverse().map(x => `<button class="rlrow" data-ra="${x.a}"><b>${x.h}</b>${x.l.filter(l => !/^🎲|^📐|^🚪|^Escolhido/.test(l)).map(l => `<small>${l}</small>`).join("")}</button>`).join("")}</div>
+      <div class="acts" style="margin-top:10px"><button class="btn small danger" id="rReset">Recomeçar do zero</button></div>`}
+    ${tables}</div>`;
+  $("#pClose").onclick = closePanel;
+  $("#gStyle").onclick = ev => { const b = ev.target.closest("[data-st]"); if (!b) return; genOpt.style = b.dataset.st; saveGenOpt(); openGenPanel(); };
+  const tg = $("#gTorch"); if (tg) tg.onchange = () => { genOpt.torches = tg.checked; saveGenOpt(); };
+  const dk0 = $("#gDark"); if (dk0) dk0.onchange = () => { genOpt.dark = dk0.checked; saveGenOpt(); };
+  if ($("#rStart")) $("#rStart").onclick = rollStart;
+  if ($("#rReset")) $("#rReset").onclick = () => { if (confirm("Apagar a masmorra rolada e começar outra pela entrada?")) { scene.roll = null; rollLast = null; rollStart(); } };
+  for (const [id, k] of [["rC", "content"], ["rS", "shape"], ["rE", "exits"]]) { const s = $("#" + id); if (s) s.onchange = () => { rollChoice[k] = s.value; }; }
+  if ($("#rRoll")) $("#rRoll").onclick = () => { if (rollSel != null) rollStep(rollSel); };
+  const goEx = e => { const [x, y] = rollExitPos(e); centerOn(x, y, Math.max(cam.z, .7)); };
+  if ($("#rGo")) $("#rGo").onclick = () => { const e = R.ex.find(x => x.id === rollSel); if (e) goEx(e); };
+  $("#panel").querySelectorAll("[data-rex]").forEach(b => b.onclick = () => { rollSel = +b.dataset.rex; dirty = true; openRollPanel(); });
+  $("#panel").querySelectorAll("[data-ra]").forEach(b => b.onclick = () => { const a = R.areas[+b.dataset.ra - 1], g = scene.gen; if (a) centerOn(g.x0 + a.c[0] * g.s, g.y0 + a.c[1] * g.s, Math.max(cam.z, .6)); });
+  dirty = true;
+}
+
 // ---------- mapas salvos (pastas) ----------
 const LIB0 = 1000;
 let libList = null, libFolders = [], libClosed = (() => { try { return JSON.parse(localStorage.getItem("mesa.libclosed")) || {}; } catch { return {}; } })(), libBusy = false;
@@ -1140,7 +1470,7 @@ async function libOpen(id){
     else if (!scene.libId && (scene.bg || scene.gen || tokens.length || walls().length) && !confirm(`Abrir “${m?.n}”? O mapa de agora não está salvo nos Mapas e vai ser substituído.`)) return;
     const {data, error} = await sb.from("map_state").select("*").eq("id", id).maybeSingle();
     if (error || !data) return toast("Não abri: " + (error?.message || "mapa não encontrado"));
-    const sc = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, ...(data.scene || {})};
+    const sc = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, roll: null, ...(data.scene || {})};
     sc.grid = {type: "square", size: 70, ox: 0, oy: 0, color: "#000000", alpha: .35, show: true, unit: 1.5, unitName: "m", ...(data.scene?.grid || {})};
     sc.libId = id; sc.libName = data.scene?.lib?.n || m?.n || "Mapa"; sc.libF = data.scene?.lib?.f || ""; delete sc.lib;
     scene = sc; tokens = data.tokens || []; drawings = data.drawings || [];
@@ -1193,7 +1523,7 @@ async function openMapsPanel(){
   $("#mBlank").onclick = async () => {
     if (scene.libId) await libSaveCur(true); else if ((scene.bg || scene.gen || tokens.length || walls().length) && !confirm("O mapa de agora não está salvo nos Mapas. Começar um vazio mesmo assim?")) return;
     const chars = tokens.filter(t => !isProp(t));
-    scene = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, libId: null, libName: null, libF: "", grid: {...scene.grid}}; tokens = chars.map(t => ({...t, tr: []})); drawings = []; fog = {on: false, cells: {}}; resetExplore();
+    scene = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, roll: null, libId: null, libName: null, libF: "", grid: {...scene.grid}}; tokens = chars.map(t => ({...t, tr: []})); drawings = []; fog = {on: false, cells: {}}; resetExplore();
     wallsVer++; losCache.clear(); save("scene"); save("tokens"); save("drawings"); save("fog", false); dirty = true; drawTop(); drawEmpty(); fit(); openMapsPanel();
   };
   $("#mNewF").onclick = async () => { const n = (prompt("Nome da pasta:") || "").trim().slice(0, 30); if (!n) return; if (!libFolders.includes(n)) { libFolders.push(n); await libSaveFolders(); } openMapsPanel(); };
@@ -1326,16 +1656,32 @@ function segsCross([ax, ay], [bx, by], [cx, cy, dx, dy]){
   const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx), d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
   return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && d1 && d2 && d3 && d4;
 }
-const blockedMove = (x1, y1, x2, y2) => blocking().some(w => segsCross([x1, y1], [x2, y2], w));
+// objetos sólidos: ninguém (jogador) atravessa. Tapetes, escadas, ossos, armadilhas etc. dão para pisar.
+const WALKABLE = new Set(["tapete", "tapete-redondo", "pele-urso", "sangue", "agua-rasa", "flores", "moita", "trigo", "plantacao", "galhos", "nenufares", "escada", "escada-sobe", "escada-mao", "alcapao", "espinhos", "buraco", "grade-chao", "teia", "circulo-ritual", "ossos", "cranios", "esqueleto", "cogumelos", "cogumelos-brilho", "ponte", "saco-dormir", "velas", "ouro", "livros", "pergaminho", "espada", "escudo", "pocoes", "mapa-mesa", "tocha-parede", "estaca-cavalo", "mochila", "grilhoes", "tocha", "escombros"]);
+const propId = t => String(t.img || "").split("/").pop().replace(/\.svg(\?.*)?$/, "");
+const propSolid = t => isProp(t) && !t.h && (t.so != null ? !!t.so : !WALKABLE.has(propId(t)));
+function solidAt(x, y){ // ponto dentro de algum objeto sólido?
+  for (const t of tokens) {
+    if (!propSolid(t)) continue;
+    const [W, H] = propSize(t), [lx, ly] = propLocal(t, x, y);
+    if (t.blk === "circle" ? Math.hypot(lx / (W / 2), ly / (H / 2)) <= .85 : Math.abs(lx) <= W / 2 * .92 && Math.abs(ly) <= H / 2 * .92) return t;
+  }
+  return null;
+}
+const cornerHit = (x1, y1, x2, y2, w) => { // o movimento passa bem em cima da ponta de uma parede (canto em L)?
+  for (const [px, py] of [[w[0], w[1]], [w[2], w[3]]]) { if (Math.hypot(px - x1, py - y1) < 1 || Math.hypot(px - x2, py - y2) < 1) continue; if (distSeg(px, py, [x1, y1], [x2, y2]) < 1.5) return true; }
+  return false;
+};
+const blockedMove = (x1, y1, x2, y2) => { if (blocking().some(w => segsCross([x1, y1], [x2, y2], w) || cornerHit(x1, y1, x2, y2, w))) return true; const s = solidAt(x2, y2); return !!s && s !== solidAt(x1, y1); };
 // memória: o mestre anota as casas que o grupo já viu e salva no banco
-let exT = null, exImgEl = null, exImgSrc = null, exC = null, exReady = false;
+let exPrevEl = null, exT = null, exImgEl = null, exImgSrc = null, exC = null, exReady = false;
 function exImage(){ // imagem da memória vinda do banco
-  const src = fog.exImg; if (!src) return null;
-  if (src !== exImgSrc) { exImgSrc = src; exImgEl = new Image(); exImgEl.onload = () => { dirty = true; }; exImgEl.src = src; }
-  return exImgEl.complete && exImgEl.naturalWidth ? exImgEl : null;
+  const src = fog.exImg; if (!src) { exPrevEl = null; return null; }
+  if (src !== exImgSrc) { exImgSrc = src; const im = new Image(); im.onload = () => { exPrevEl = im; dirty = true; }; im.src = src; exImgEl = im; }
+  return exImgEl.complete && exImgEl.naturalWidth ? exImgEl : exPrevEl;   // mantém a anterior até a nova carregar (sem piscar)
 }
 function exBoxNow(){
-  const mb = mapBox(), [w, h] = mb ? [mb[2], mb[3]] : [9000, 9000], x0 = mb ? mb[0] - 200 : -3000, y0 = mb ? mb[1] - 200 : -3000, W2 = w + (mb ? 400 : 0), H2 = h + (mb ? 400 : 0);
+  const mb = mapBox(true), [w, h] = mb ? [mb[2], mb[3]] : [9000, 9000], x0 = mb ? mb[0] - 200 : -3000, y0 = mb ? mb[1] - 200 : -3000, W2 = w + (mb ? 400 : 0), H2 = h + (mb ? 400 : 0);
   const s = Math.min(.25, 1600 / Math.max(W2, H2));
   return {x0, y0, w: Math.round(W2 * s), h: Math.round(H2 * s), s, W: W2, H: H2};
 }
@@ -1419,7 +1765,9 @@ cv.addEventListener("pointerdown", e => {
   if (e.button === 1 || e.button === 2 || spaceDown) { drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return; }
   if (tool === "move") {
     const t = hitToken(wx, wy);
+    if (isGM && scene.roll) { const rx = rollExitAt(wx, wy); if (rx) { rollSel = rx.id; genOpt.style = "rolled"; openRollPanel(); return; } }
     if (!t && isGM) { const wi = wallAt(wx, wy); const w = walls()[wi]; if (w?.d) { w.o = w.o ? 0 : 1; wallsChanged(); toast(w.o ? "Porta aberta." : "Porta fechada."); return; } }
+    if (!t && !isGM) { const w = doorAt(wx, wy); if (w && tokens.some(x => !isProp(x) && owns(x) && nearDoor(x, w))) { playerDoor(w); return; } }
     const sel = tokens.find(x => x.id === selTok);
     if (sel && (isGM || owns(sel))) { // pegou na setinha do token selecionado?
       if (isProp(sel)) { const [hx, hy] = propHandle(sel); if (Math.hypot(wx - hx, wy - hy) <= 12 / cam.z) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; } }
@@ -1471,6 +1819,7 @@ cv.addEventListener("pointermove", e => {
   if (!drag) {
     if (tool === "fog" && isGM && opt.fogShape === "brush") { hoverFog = [wx, wy]; dirty = true; }
     if (tool === "wall" && wallDraft) { hoverWall = snapWall(wx, wy, e.shiftKey); dirty = true; }
+    if (tool === "move") { const dw = doorAt(wx, wy); cv.style.cursor = dw && (isGM || tokens.some(t => !isProp(t) && owns(t) && nearDoor(t, dw))) ? "pointer" : ""; }
     if (clickMoveTok()) { const c = cellAt(wx, wy); if (!hoverCell || c[0] !== hoverCell[0] || c[1] !== hoverCell[1]) { hoverCell = c; dirty = true; } }
     return;
   }
@@ -2304,6 +2653,13 @@ async function boot(){
     if (p.live) tokLive[p.id] = p.a != null ? {x: p.x, y: p.y, a: p.a} : {x: p.x, y: p.y};
     else { delete tokLive[p.id]; const t = tokens.find(x => x.id === p.id); if (t) { t.x = p.x; t.y = p.y; if (p.a != null) t.a = p.a; } }
     dirty = true;
+  });
+  chan.on("broadcast", {event: "door"}, ({payload: p}) => { // jogador abriu/fechou uma porta: o mestre confere
+    if (!isGM || !p?.k) return;
+    const w = walls().find(x => x.d && !x.s && x.p?.join(",") === p.k); if (!w) return;
+    const who = String(p.who || "").toLowerCase();
+    if (!tokens.some(t => !isProp(t) && t.o && (t.o === "*" || t.o.toLowerCase() === who) && nearDoor(t, w))) return save("scene", false);
+    w.o = w.o ? 0 : 1; wallsChanged(); toast(`${p.who || "Jogador"} ${w.o ? "abriu" : "fechou"} uma porta.`, 1800);
   });
   chan.on("broadcast", {event: "tokreq"}, ({payload: p}) => { // jogador moveu/girou o próprio token: o mestre confere e salva
     if (!isGM || !p?.id) return;

@@ -365,6 +365,25 @@ input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:tex
 .mname small{color:var(--ink3);font-size:11px}
 .btn.ic{padding:4px 7px;min-width:0}
 .empty-map .acts{display:flex;gap:8px;flex-wrap:wrap}
+
+/* v15: masmorra rolada */
+.rlast{background:linear-gradient(180deg,rgba(208,165,76,.16),rgba(208,165,76,.05));border:1px solid var(--brass);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:14px;line-height:1.45}
+.rlast > b{display:block;font:700 17px/1.2 var(--display);color:var(--brass);margin-bottom:4px}
+.rexits{display:flex;flex-direction:column;gap:4px;max-height:170px;overflow:auto}
+.rex{display:flex;align-items:center;gap:8px;text-align:left;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font-size:13px;cursor:pointer}
+.rex span{width:20px;height:20px;border-radius:50%;background:var(--brass);color:var(--brass-ink);display:grid;place-items:center;font-weight:800;flex:none}
+.rex[aria-pressed="true"]{border-color:var(--brass);background:var(--card2)}
+.gnum.rsel{grid-template-columns:1fr;grid-column:1/-1}
+.gnum.rsel select{width:100%}
+.rlog{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto}
+.rlrow{display:flex;flex-direction:column;gap:1px;text-align:left;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer}
+.rlrow b{font-size:13px}.rlrow small{color:var(--ink2);font-size:12px}
+.rtab{margin-top:12px;border-top:1px solid var(--line);padding-top:8px;font-size:13px}
+.rtab summary{cursor:pointer;color:var(--brass);font-weight:700}
+.rtab table{width:100%;border-collapse:collapse;margin:4px 0 10px}
+.rtab td{padding:2px 6px;border-bottom:1px solid rgba(74,61,48,.5)}
+.rtab td:first-child{width:48px;color:var(--ink3);white-space:nowrap}
+.rtab p{margin:2px 0 10px;color:var(--ink2)}
 </style>
 </head>
 <body>
