@@ -281,6 +281,7 @@ function paint(){
   paintPings();
   paintDropPrev();
   if (barEdId) placeBarEd();
+  $("#doorPop")?._place?.();
   if (drag?.kind === "propsize" && drag.at) label(drag.at[0], drag.at[1], `${String(drag.t.pw).replace(".", ",")} × ${String(drag.t.ph).replace(".", ",")} casas`);
   // réguas
   for (const k in rulers) paintRuler(rulers[k], k === myKey);
@@ -533,6 +534,7 @@ function paintWalls(){
     if (w.d) { ctx.lineWidth = 7 / cam.z; ctx.strokeStyle = w.o ? "rgba(95,190,110,.9)" : w.s ? "#b86ae0" : "#b07a3a"; ctx.setLineDash(w.o ? [6 / cam.z, 6 / cam.z] : []); }
     else { ctx.lineWidth = 4 / cam.z; ctx.strokeStyle = "rgba(240,130,60,.9)"; ctx.setLineDash([]); }
     ctx.stroke();
+    if (w.d && w.lk) { ctx.save(); ctx.setLineDash([]); const fs = Math.max(12 / cam.z, G().size * .28); ctx.font = `${fs}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.shadowColor = "#000"; ctx.shadowBlur = 4; ctx.fillText("🔒", (x1 + x2) / 2, (y1 + y2) / 2); ctx.restore(); }
   }
   ctx.setLineDash([]);
   if (wallDraft && hoverWall) { ctx.beginPath(); ctx.moveTo(...wallDraft); ctx.lineTo(...hoverWall); ctx.lineWidth = 3 / cam.z; ctx.strokeStyle = opt.wall === "door" ? "#b07a3a" : "rgba(240,130,60,.8)"; ctx.setLineDash([8 / cam.z, 6 / cam.z]); ctx.stroke(); ctx.setLineDash([]); }
@@ -887,7 +889,20 @@ function lookAt(wx, wy){
 function doorAt(x, y){ const tol = Math.max(10 / cam.z, G().size * .22); let best = null, bd = tol; for (const w of walls()) { if (!w.d || w.s || !w.p) continue; const dd = distSeg(x, y, [w.p[0], w.p[1]], [w.p[2], w.p[3]]); if (dd < bd) { bd = dd; best = w; } } return best; }
 const doorMid = w => [(w.p[0] + w.p[2]) / 2, (w.p[1] + w.p[3]) / 2];
 const nearDoor = (t, w) => { const [mx, my] = doorMid(w); return Math.hypot(t.x - mx, t.y - my) <= G().size * 1.6 + tokR(t); };
+// ---- cadeado das portas (só o mestre tranca e destranca) ----
+function doorPop(w){
+  let el = $("#doorPop"); el?.remove(); el = document.createElement("div"); el.id = "doorPop"; el.className = "doorpop";
+  const draw = () => { el.innerHTML = `<button data-dl title="${w.lk ? "Destrancar" : "Trancar"}">${w.lk ? "🔒" : "🔓"}<small>${w.lk ? "Trancada" : "Destrancada"}</small></button>`; };
+  draw(); document.body.appendChild(el); el.onpointerdown = e => e.stopPropagation();
+  const place = () => { if (!el.isConnected) return; const [mx, my] = doorMid(w); el.style.left = (mx * cam.z + cam.x) + "px"; el.style.top = (my * cam.z + cam.y - 16) + "px"; };
+  place(); el._place = place; doorPopW = w;
+  el.onclick = () => { w.lk = w.lk ? 0 : 1; if (w.lk && w.o) w.o = 0; wallsChanged(); draw(); toast(w.lk ? "🔒 Porta trancada: os jogadores não conseguem abrir." : "🔓 Porta destrancada.", 1800);
+    if (DS.init()) { const t0 = DS.ctx.currentTime; DS.click(t0, 2400, .35, .04, 3); DS.click(t0 + .07, 1600, .3, .05, 3); } };
+  clearTimeout(doorPopT); doorPopT = setTimeout(() => el.remove(), 6000);
+}
+let doorPopT = null, doorPopW = null;
 function playerDoor(w){
+  if (w.lk) { toast("🔒 A porta está trancada.", 1800); if (DS.init()) { const t0 = DS.ctx.currentTime; for (let i = 0; i < 3; i++) DS.click(t0 + i * .09, 900 + i * 120, .4, .06, 2); } return; }
   const mine = tokens.filter(t => !isProp(t) && owns(t) && nearDoor(t, w));
   if (!mine.length) return toast("Chegue perto da porta para abrir.");
   send("door", {k: w.p.join(","), who: myNick}); w.o = w.o ? 0 : 1; pendDoor[w.p.join(",")] = {o: w.o, until: Date.now() + 5000}; wallsVer++; losCache.clear(); dirty = true;
@@ -2676,10 +2691,13 @@ cv.addEventListener("pointerdown", e => {
   if (e.button === 1 || e.button === 2 || spaceDown) { drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return; }
   if (barBtn && e.button === 0) { const q = 3 / cam.z; if (wx >= barBtn.x - q && wx <= barBtn.x + barBtn.s + q && wy >= barBtn.y - q && wy <= barBtn.y + barBtn.s + q) { const bt = tokens.find(x => x.id === barBtn.id); if (bt) barEdId === bt.id ? closeBarEd() : openBarEd(bt); dirty = true; return; } }
   if (barEdId && hitToken(wx, wy)?.id !== barEdId) closeBarEd();
+  $("#doorPop")?.remove();
   if (tool === "move") {
     const t = hitToken(wx, wy);
     if (isGM && scene.roll) { const rx = rollExitAt(wx, wy); if (rx) { rollSel = rx.id; genOpt.style = "rolled"; openRollPanel(); return; } }
-    if (!t && isGM) { const wi = wallAt(wx, wy); const w = walls()[wi]; if (w?.d) { w.o = w.o ? 0 : 1; wallsChanged(); toast(w.o ? "Porta aberta." : "Porta fechada."); return; } }
+    if (!t && isGM) { const wi = wallAt(wx, wy); const w = walls()[wi]; if (w?.d) {
+      if (w.lk) toast("🔒 Porta trancada. Clique no cadeado para destrancar.", 2200); else { w.o = w.o ? 0 : 1; wallsChanged(); toast(w.o ? "Porta aberta." : "Porta fechada.", 1400); }
+      doorPop(w); return; } }
     if (!t && !isGM) { const w = doorAt(wx, wy); if (w && tokens.some(x => !isProp(x) && owns(x) && nearDoor(x, w))) { playerDoor(w); return; } }
     const sel = tokens.find(x => x.id === selTok);
     if (sel && (isGM || owns(sel))) { // pegou na setinha do token selecionado?
@@ -3664,7 +3682,7 @@ async function boot(){
     showHandout(p.item, true);
   });
   chan.on("broadcast", {event: "doorres"}, ({payload: p}) => { // resposta do mestre sobre uma porta
-    if (isGM || !p?.k) return; delete pendDoor[p.k];
+    if (isGM || !p?.k) return; delete pendDoor[p.k]; if (p.lk) toast("🔒 A porta está trancada.", 1800);
     const w = walls().find(x => x.d && x.p?.join(",") === p.k); if (w && (w.o ? 1 : 0) !== p.o) { w.o = p.o; wallsVer++; losCache.clear(); dirty = true; }
   });
   chan.on("broadcast", {event: "door"}, ({payload: p}) => { // jogador abriu/fechou uma porta: o mestre confere
@@ -3672,7 +3690,7 @@ async function boot(){
     const w = walls().find(x => x.d && !x.s && x.p?.join(",") === p.k); if (!w) return;
     const who = String(p.who || "").toLowerCase();
     const near = t => { const [mx, my] = doorMid(w), L = tokLive[t.id] || t; return Math.hypot(L.x - mx, L.y - my) <= G().size * 2.6 + tokR(t); };   // o mestre é mais tolerante (atraso da rede)
-    if (!tokens.some(t => !isProp(t) && t.o && (t.o === "*" || t.o.toLowerCase() === who) && near(t))) return send("doorres", {k: p.k, o: w.o ? 1 : 0});
+    if (w.lk || !tokens.some(t => !isProp(t) && t.o && (t.o === "*" || t.o.toLowerCase() === who) && near(t))) return send("doorres", {k: p.k, o: w.o ? 1 : 0, lk: w.lk ? 1 : 0});
     w.o = w.o ? 0 : 1; wallsChanged(); send("doorres", {k: p.k, o: w.o}); toast(`${p.who || "Jogador"} ${w.o ? "abriu" : "fechou"} uma porta.`, 1800);
   });
   chan.on("broadcast", {event: "tokreq"}, ({payload: p}) => { // jogador moveu/girou o próprio token: o mestre confere e salva
