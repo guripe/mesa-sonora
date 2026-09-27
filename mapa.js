@@ -31,6 +31,7 @@ I.wall = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-widt
 I.list = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="4.5" cy="18" r="1.5"/></svg>';
 I.dungeon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 3h7v5h4V3h7v7h-5v4h5v7h-7v-5h-4v5H3v-7h5v-4H3z"/></svg>';
 I.maps = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg>';
+I.notes = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2M9 8h6M9 12h6M9 16h4"/></svg>';
 I.door = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 21V4l10-1v18"/><path d="M3 21h18"/><circle cx="12" cy="12" r="1"/></svg>';
 const COLORS = ["#d0a54c", "#c0473a", "#4a72b8", "#5f9a4a", "#8a5bb0", "#e07b2e", "#e8e2d0", "#222222"];
 
@@ -143,7 +144,7 @@ function selBar(){
   const setHP = (i, v) => {
     const cur = tokens.find(x => x.id === selTok); if (!cur?.b?.[i]) return;
     v = Math.round(v); cur.b[i].v = v; dirty = true; selBarKey = "";
-    if (isGM) save("tokens"); else send("tokreq", {id: cur.id, bi: i, bv: v, who: myNick});
+    if (isGM) save("tokens"); else tokReq({id: cur.id, bi: i, bv: v, who: myNick});
   };
   el.querySelectorAll("[data-hpv]").forEach(inp => {
     inp.onkeydown = e => { if (e.key === "Enter") inp.blur(); e.stopPropagation(); };
@@ -425,8 +426,9 @@ const VI = t => { // visão com valores padrão (e compatível com a versão ant
 const LI = t => { const l = t.li; return l && ((+l.rb || 0) > 0 || (+l.rd || 0) > 0) ? {rb: +l.rb || 0, rd: +l.rd || 0, ang: l.ang == null ? 360 : +l.ang, c: l.c || null} : null; };
 const lightSkip = t => isProp(t) ? t.id : 0;
 let RT = null;   // alvo de desenho: null = tela; senão um retângulo do mundo (usado pela memória)
-const cvs = {}; function off(k){ if (RT) k += "_w"; let c = cvs[k]; if (!c) { c = cvs[k] = document.createElement("canvas"); } const W0 = RT ? RT.w : cv.width, H0 = RT ? RT.h : cv.height; if (c.width !== W0 || c.height !== H0) { c.width = W0; c.height = H0; } const x = c.getContext("2d"); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.filter = "none"; x.clearRect(0, 0, c.width, c.height); return [c, x]; }
-const W = x => { if (RT) return x.setTransform(RT.s, 0, 0, RT.s, -RT.x0 * RT.s, -RT.y0 * RT.s); const d = devicePixelRatio || 1; x.setTransform(d * cam.z, 0, 0, d * cam.z, d * cam.x, d * cam.y); };
+const LQ = .5;   // a escuridão é calculada em meia resolução (bem mais leve; o desfoque esconde a diferença)
+const cvs = {}; function off(k, hi){ if (RT) k += "_w"; let c = cvs[k]; if (!c) { c = cvs[k] = document.createElement("canvas"); } c._q = RT ? 1 : hi ? 1 : LQ; const W0 = RT ? RT.w : Math.ceil(cv.width * c._q), H0 = RT ? RT.h : Math.ceil(cv.height * c._q); if (c.width !== W0 || c.height !== H0) { c.width = W0; c.height = H0; } const x = c.getContext("2d"); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.filter = "none"; x.clearRect(0, 0, c.width, c.height); return [c, x]; }
+const W = x => { if (RT) return x.setTransform(RT.s, 0, 0, RT.s, -RT.x0 * RT.s, -RT.y0 * RT.s); const d = (devicePixelRatio || 1) * (x.canvas._q || 1); x.setTransform(d * cam.z, 0, 0, d * cam.z, d * cam.x, d * cam.y); };
 function lightMasks(ts){ // B = luz intensa, D = luz fraca ou melhor
   const amb = scene.light || "day";
   const [bc, bx] = off("B"), [dc, dx] = off("D");
@@ -481,20 +483,20 @@ function paintLighting(vs, alpha = 1){
     ox.globalCompositeOperation = "destination-out"; ox.globalAlpha = .42; W(ox); ox.imageSmoothingEnabled = true; ox.drawImage(exI, x0, y0, w, h);
     ox.setTransform(1, 0, 0, 1, 0, 0); ox.globalAlpha = 1; ox.globalCompositeOperation = "source-over";
   }
-  ox.globalCompositeOperation = "destination-out"; ox.filter = "blur(3px)"; ox.drawImage(U, 0, 0); ox.filter = "none";
+  ox.globalCompositeOperation = "destination-out"; ox.filter = `blur(${3 * LQ}px)`; ox.drawImage(U, 0, 0); ox.filter = "none";
   // penumbra: o que se vê sem luz intensa fica mais escuro
   const [pc, px] = off("P"); px.drawImage(U, 0, 0); px.globalCompositeOperation = "destination-out"; px.drawImage(B, 0, 0);
   px.globalCompositeOperation = "source-in"; px.fillStyle = "#060504"; px.fillRect(0, 0, pc.width, pc.height);
-  ox.globalCompositeOperation = "source-over"; ox.globalAlpha = .5; ox.filter = "blur(3px)"; ox.drawImage(pc, 0, 0); ox.filter = "none"; ox.globalAlpha = 1;
-  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(oc, 0, 0); ctx.restore();
+  ox.globalCompositeOperation = "source-over"; ox.globalAlpha = .5; ox.filter = `blur(${3 * LQ}px)`; ox.drawImage(pc, 0, 0); ox.filter = "none"; ox.globalAlpha = 1;
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = true; ctx.drawImage(oc, 0, 0, cv.width, cv.height); ctx.restore();
   // paredes destacadas por cima da escuridão, só onde o jogador enxerga (ou já viu, mais apagadas)
-  const [wc, wx] = off("WL"); W(wx);
+  const [wc, wx] = off("WL", true); W(wx);
   const hasW = paintWallsPlayer(wx); if (walls().some(w => w.d && !w.s)) { W(wx); paintDoors(wx); }
   if (hasW || walls().some(w => w.d && !w.s)) {
-    const [mc, mx] = off("WM"), dpr = devicePixelRatio || 1, bl = Math.max(3, G().size * .12 * cam.z * dpr);
+    const [mc, mx] = off("WM"), dpr = devicePixelRatio || 1, bl = Math.max(2, G().size * .12 * cam.z * dpr * LQ);
     if (exI && fog.exBox) { const [x0, y0, w, h] = fog.exBox; W(mx); mx.globalAlpha = .5; mx.drawImage(exI, x0, y0, w, h); mx.globalAlpha = 1; mx.setTransform(1, 0, 0, 1, 0, 0); }
     mx.filter = `blur(${bl}px)`; for (let k = 0; k < 3; k++) mx.drawImage(U, 0, 0); mx.filter = "none";
-    wx.setTransform(1, 0, 0, 1, 0, 0); wx.globalCompositeOperation = "destination-in"; wx.drawImage(mc, 0, 0);
+    wx.setTransform(1, 0, 0, 1, 0, 0); wx.globalCompositeOperation = "destination-in"; wx.drawImage(mc, 0, 0, wc.width, wc.height);
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(wc, 0, 0); ctx.restore();
   }
 }
@@ -640,7 +642,7 @@ function walkTo(t, P){ // anda liso pelo caminho, virando para onde vai
     cur.x = ex; cur.y = ey; cur.a = Math.round((Math.atan2(ex - px, -(ey - py)) * 180 / Math.PI + 360) % 360);
     delete tokLive[cur.id]; walking = null; hoverCell = null; dirty = true;
     if (isGM) { pushTrail(cur, centers); send("tok", {id: cur.id, x: cur.x, y: cur.y, a: cur.a}); save("tokens"); }
-    else send("tokreq", {id: cur.id, x: cur.x, y: cur.y, a: cur.a, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
+    else tokReq({id: cur.id, x: cur.x, y: cur.y, a: cur.a, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
   };
   requestAnimationFrame(tick);
 }
@@ -694,8 +696,16 @@ function validPath(t, path){ // o mestre confere o caminho que o jogador mandou
 let ASSETS = []; fetch("/assets/index.json").then(r => r.json()).then(a => { ASSETS = a; if (panelKind === "assets") openAssets(); }).catch(() => {});
 const isProp = t => t && t.k === "prop";
 const propSize = t => [(t.pw || 1) * G().size, (t.ph || 1) * G().size];
+const propBmp = new Map();
+function propBitmap(im, W, H){ // a SVG vira bitmap no tamanho da tela (em degraus), e é reaproveitada
+  const d = (devicePixelRatio || 1) * cam.z, q = v => Math.max(8, Math.min(2048, Math.pow(2, Math.ceil(Math.log2(v * d) * 3) / 3)));
+  const bw = Math.round(q(W)), bh = Math.round(q(H)), k = im.src + "|" + bw + "|" + bh;
+  let c = propBmp.get(k);
+  if (!c) { if (propBmp.size > 600) propBmp.clear(); c = document.createElement("canvas"); c.width = bw; c.height = bh; try { c.getContext("2d").drawImage(im, 0, 0, bw, bh); } catch { return im; } propBmp.set(k, c); }
+  return c;
+}
 function paintProp(t){
-  const [W, H] = propSize(t), im = getImg(t.img);
+  const [W, H] = propSize(t), im0 = getImg(t.img), im = im0 ? propBitmap(im0, W, H) : null;
   ctx.save(); if (t.h) ctx.globalAlpha = .45;
   ctx.translate(t.x, t.y); ctx.rotate((t.a || 0) * Math.PI / 180);
   if (im) ctx.drawImage(im, -W / 2, -H / 2, W, H); else { ctx.fillStyle = t.c || "#8a5a2e"; ctx.fillRect(-W / 2, -H / 2, W, H); }
@@ -831,6 +841,27 @@ function freshDungeonTokens(){ // nova masmorra: só os personagens dos jogadore
 }
 const hexA = (c, a) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(c || "")); if (!m) return `rgba(255,180,90,${a})`; const n = parseInt(m[1], 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 
+// ---------- sem "vai e volta": o que o jogador fez vale na tela dele até o mestre confirmar ----------
+const pend = {}, pendDoor = {}, lastReq = {}; let reqSeq = 0;
+function tokReq(p){
+  p.q = ++reqSeq; lastReq[p.id] = p.q;
+  const t = tokens.find(x => x.id === p.id); if (t) pend[p.id] = {x: t.x, y: t.y, a: t.a, b: t.b ? JSON.stringify(t.b) : null, until: Date.now() + 5000};
+  send("tokreq", p);
+}
+function fixPending(){ // um retrato velho do banco chegou depois do que eu fiz: mantém o meu
+  const now = Date.now();
+  for (const id in pend) {
+    const pd = pend[id], t = tokens.find(x => x.id === id); if (!t || now > pd.until) { delete pend[id]; continue; }
+    const same = Math.hypot(t.x - pd.x, t.y - pd.y) < 1 && Math.abs(((((t.a || 0) - (pd.a || 0)) % 360) + 540) % 360 - 180) < 2 && (pd.b == null || JSON.stringify(t.b) === pd.b);
+    if (same) { delete pend[id]; continue; }
+    t.x = pd.x; t.y = pd.y; if (pd.a != null) t.a = pd.a; if (pd.b != null) t.b = JSON.parse(pd.b);
+  }
+  for (const k in pendDoor) {
+    const pd = pendDoor[k], w = walls().find(w => w.d && w.p?.join(",") === k); if (!w || now > pd.until) { delete pendDoor[k]; continue; }
+    if ((w.o ? 1 : 0) === pd.o) { delete pendDoor[k]; continue; }
+    w.o = pd.o; wallsVer++; losCache.clear();
+  }
+}
 // ---------- o personagem do jogador olha para onde o mouse está ----------
 let lookMouse = (() => { try { return localStorage.getItem("mesa.look") !== "0"; } catch { return true; } })(), lookSend = 0, lookT = null;
 function lookTok(){ const sel = tokens.find(t => t.id === selTok && !isProp(t) && owns(t)); if (sel) return sel; const mine = tokens.filter(t => !isProp(t) && owns(t)); return mine.length === 1 ? mine[0] : null; }
@@ -838,9 +869,9 @@ function lookAt(wx, wy){
   const t = lookTok(); if (!t) return;
   if (Math.hypot(wx - t.x, wy - t.y) < tokR(t) * .8) return;
   const a = Math.round((Math.atan2(wx - t.x, -(wy - t.y)) * 180 / Math.PI + 360) % 360); if (a === Math.round(t.a || 0)) return;
-  t.a = a; dirty = true; const now = performance.now();
+  t.a = a; dirty = true; const now = performance.now(); pend[t.id] = {x: t.x, y: t.y, a, b: null, until: Date.now() + 5000};
   if (now - lookSend > 70) { lookSend = now; send("tok", {id: t.id, x: Math.round(t.x), y: Math.round(t.y), a, live: 1}); }
-  clearTimeout(lookT); lookT = setTimeout(() => { if (!walking) send("tokreq", {id: t.id, a: t.a, who: myNick}); }, 350);
+  clearTimeout(lookT); lookT = setTimeout(() => { if (!walking) tokReq({id: t.id, a: t.a, who: myNick}); }, 350);
 }
 // ---------- jogadores abrem e fecham portas (perto do próprio personagem) ----------
 function doorAt(x, y){ const tol = Math.max(10 / cam.z, G().size * .22); let best = null, bd = tol; for (const w of walls()) { if (!w.d || w.s || !w.p) continue; const dd = distSeg(x, y, [w.p[0], w.p[1]], [w.p[2], w.p[3]]); if (dd < bd) { bd = dd; best = w; } } return best; }
@@ -849,7 +880,7 @@ const nearDoor = (t, w) => { const [mx, my] = doorMid(w); return Math.hypot(t.x 
 function playerDoor(w){
   const mine = tokens.filter(t => !isProp(t) && owns(t) && nearDoor(t, w));
   if (!mine.length) return toast("Chegue perto da porta para abrir.");
-  send("door", {k: w.p.join(","), who: myNick}); w.o = w.o ? 0 : 1; wallsVer++; losCache.clear(); dirty = true;
+  send("door", {k: w.p.join(","), who: myNick}); w.o = w.o ? 0 : 1; pendDoor[w.p.join(",")] = {o: w.o, until: Date.now() + 5000}; wallsVer++; losCache.clear(); dirty = true;
   toast(w.o ? "Você abriu a porta." : "Você fechou a porta.", 1500);
 }
 // ---------- paredes que os jogadores enxergam (a escuridão esconde as que ainda não foram vistas) ----------
@@ -1800,7 +1831,7 @@ async function openMapsPanel(){
       <span class="mthumb">${m.bg ? `<img src="${esc(m.bg)}" alt="" loading="lazy">` : m.gs ? (m.gs === "cave" ? "⛰" : "🏰") : "▦"}</span>
       <span class="mname"><b>${esc(m.n)}</b><small>${m.id === scene.libId ? "aberto agora · " : ""}${when(m.at)}</small></span>
       <button class="btn small primary" data-open="${m.id}" ${m.id === scene.libId ? "disabled" : ""}>Abrir</button>
-      <button class="btn small ic" data-ren="${m.id}" title="Renomear" aria-label="Renomear">✎</button>
+      ${m.bg ? `<button class="btn small ic" data-mrel="${m.id}" title="Liberar a imagem deste mapa no diário dos jogadores" aria-label="Liberar para os jogadores">📤</button>` : ""}<button class="btn small ic" data-ren="${m.id}" title="Renomear" aria-label="Renomear">✎</button>
       <button class="btn small ic" data-dup="${m.id}" title="Duplicar" aria-label="Duplicar">⧉</button>
       <button class="btn small ic danger" data-del="${m.id}" title="Apagar" aria-label="Apagar">🗑</button></div>`;
   const groups = [["", "Sem pasta"], ...libFolders.map(f => [f, f])];
@@ -1831,6 +1862,7 @@ async function openMapsPanel(){
     const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
     if (d.tog != null) { libClosed[d.tog] = !libClosed[d.tog]; saveLibClosed(); openMapsPanel(); }
     else if (d.open) libOpen(+d.open);
+    else if (d.mrel) { const m = libList.find(x => x.id === +d.mrel); if (!m?.bg) return; if (!hand) await handLoad(); if (hand.some(h => h.url === m.bg)) { hand.find(h => h.url === m.bg).vis = true; } else hand.push({id: uid(), cat: "mapa", t: m.n, body: "", url: m.bg, vis: true, at: Date.now()}); await handSave(); toast(`Imagem de “${m.n}” liberada em Mapas para os jogadores.`); }
     else if (d.ren) { const m = libList.find(x => x.id === +d.ren); const n = (prompt("Novo nome:", m.n) || "").trim().slice(0, 40); if (n) { await libPatch(m.id, l => ({...l, n})); refresh(); } }
     else if (d.dup) { const {data, error} = await sb.from("map_state").select("*").eq("id", +d.dup).maybeSingle(); if (error || !data) return toast("Não consegui duplicar."); const id = Math.max(LIB0 - 1, ...libList.map(m => m.id)) + 1; data.scene = {...(data.scene || {}), lib: {...(data.scene?.lib || {}), n: (data.scene?.lib?.n || "Mapa") + " (cópia)"}}; delete data.scene.libId; const {error: e2} = await sb.from("map_state").insert({...data, id, updated_at: new Date().toISOString()}); if (e2) toast("Não consegui duplicar: " + e2.message); refresh(); }
     else if (d.del) { const m = libList.find(x => x.id === +d.del); if (!confirm(`Apagar o mapa salvo “${m.n}”? Não dá para desfazer.`)) return; const {error} = await sb.from("map_state").delete().eq("id", m.id); if (error) return toast("Não apaguei: " + error.message); if (scene.libId === m.id) { scene.libId = null; save("scene", false); } refresh(); }
@@ -1893,6 +1925,124 @@ function paintDropPrev(){
   else { const a = p.k === "as" ? ASSETS[p.i] : myAssets[p.i]; if (a) { const t = {k: "prop", pw: a.w, ph: a.h, a: 0, sn: true, img: p.k === "as" ? `/assets/${a.path || a.id + ".svg"}` : a.src}; const [x, y] = snapProp(t, d.x, d.y); t.x = x; t.y = y; paintProp(t); const [W2, H2] = propSize(t); ctx.globalAlpha = 1; ctx.setLineDash([6 / cam.z, 4 / cam.z]); ctx.strokeStyle = "#ffe28a"; ctx.lineWidth = 2 / cam.z; ctx.strokeRect(x - W2 / 2, y - H2 / 2, W2, H2); ctx.setLineDash([]); } }
   ctx.restore();
 }
+// ---------- anotações e mapas para os jogadores (o mestre libera) + popup na tela ----------
+// guardado na linha 998 do map_state (coluna drawings): [{id, cat: "mapa"|"nota"|"imagem", t, body, url, vis, at}]
+const HD_ROW = 998, HCAT = {mapa: ["🗺", "Mapa"], nota: ["📜", "Nota"], imagem: ["🖼", "Imagem"]};
+let hand = null, handTab = "all", handQ = "", handEdit = null;
+let myNotes = (() => { try { return JSON.parse(localStorage.getItem("mesa.mynotes")) || []; } catch { return []; } })();
+const saveMyNotes = () => { try { localStorage.setItem("mesa.mynotes", JSON.stringify(myNotes)); } catch {} };
+async function handLoad(){
+  const {data, error} = await sb.from("map_state").select("drawings").eq("id", HD_ROW).maybeSingle();
+  if (error) { toast("Não carreguei as anotações: " + error.message); hand = hand || []; return; }
+  hand = Array.isArray(data?.drawings) ? data.drawings : [];
+}
+async function handSave(){
+  const {error} = await sb.from("map_state").upsert({id: HD_ROW, drawings: hand, updated_at: new Date().toISOString()});
+  if (error) return toast("Não salvei: " + error.message);
+  send("hand", {v: Date.now()});
+}
+const handVisible = () => (hand || []).filter(h => isGM || h.vis);
+function handRow(h){
+  const [ic, nm] = HCAT[h.cat] || HCAT.nota;
+  return `<div class="hrow ${h.vis ? "vis" : ""}" data-hid="${esc(h.id)}">
+    <button class="hmain" data-hopen="${esc(h.id)}">${h.url ? `<span class="hthumb"><img src="${esc(h.url)}" alt="" loading="lazy"></span>` : `<span class="hthumb ic">${ic}</span>`}<span class="hname"><b>${esc(h.t || nm)}</b><small>${nm}${isGM ? (h.vis ? " · <span class='hv'>jogadores veem</span>" : " · só você") : ""}</small></span></button>
+    ${isGM ? `<button class="btn small ic" data-hvis="${esc(h.id)}" title="${h.vis ? "Esconder dos jogadores" : "Liberar para os jogadores"}" aria-label="Visibilidade">${h.vis ? "👁" : "🔒"}</button><button class="btn small ic" data-hpop="${esc(h.id)}" title="Mostrar agora na tela dos jogadores" aria-label="Mostrar na tela">📢</button><button class="btn small ic" data-hedit="${esc(h.id)}" title="Editar" aria-label="Editar">✎</button>` : ""}</div>`;
+}
+async function openHandPanel(tab){
+  panelKind = "hand"; if (tab) handTab = tab;
+  if (!hand) { $("#panel").innerHTML = `<div class="panel hand-panel"><h3>${isGM ? "Anotações" : "Diário"} <button class="btn small" id="pClose">Fechar</button></h3><p class="hint">Carregando…</p></div>`; $("#pClose").onclick = closePanel; await handLoad(); if (panelKind !== "hand") return; }
+  const tabs = isGM ? [["all", "Tudo"], ["mapa", "🗺 Mapas"], ["nota", "📜 Notas"], ["imagem", "🖼 Imagens"]] : [["mapa", "🗺 Mapas"], ["nota", "📜 Anotações"], ["mine", "✍ Minhas notas"]];
+  if (!tabs.some(t => t[0] === handTab)) handTab = tabs[0][0];
+  const q = norm(handQ), list = handVisible().filter(h => (handTab === "all" || h.cat === handTab || (!isGM && handTab === "nota" && h.cat === "imagem")) && (!q || norm(h.t + " " + (h.body || "")).includes(q))).sort((a, b) => (b.at || 0) - (a.at || 0));
+  const peers = [...new Set(peersOnMap)].filter(n => n);
+  $("#panel").innerHTML = `<div class="panel hand-panel" role="dialog" aria-label="${isGM ? "Anotações" : "Diário"}"><h3>${isGM ? "Anotações e arquivos" : "Diário do grupo"} <button class="btn small" id="pClose">Fechar</button></h3>
+    <div class="seg htabs" id="hTabs">${tabs.map(([k, l]) => `<button data-htab="${k}" aria-pressed="${handTab === k}">${l}</button>`).join("")}</div>
+    ${handTab === "mine" ? `<p class="hint">Só você vê estas notas (ficam neste computador).</p>
+      <div class="hlist">${myNotes.map((n, i) => `<div class="mynote"><input type="text" data-mnt="${i}" value="${esc(n.t)}" placeholder="Título" maxlength="60"><textarea data-mnb="${i}" rows="4" placeholder="Escreva aqui…">${esc(n.body)}</textarea><button class="btn small danger" data-mndel="${i}">Apagar</button></div>`).join("") || `<p class="hint">Nenhuma nota ainda.</p>`}</div>
+      <div class="acts"><button class="btn small primary" id="mnAdd">＋ Nova nota</button></div>`
+    : `<input type="search" id="hQ" placeholder="Procurar…" value="${esc(handQ)}">
+      ${isGM ? `<div class="acts" style="margin:8px 0"><button class="btn small primary" id="hNewNote">＋ Nota</button><button class="btn small" id="hNewImg">＋ Mapa ou imagem</button></div>
+        <details class="hquick"><summary>📢 Mensagem rápida na tela dos jogadores</summary><textarea id="hqTxt" rows="3" placeholder="Ex.: Vocês ouvem passos vindo do corredor…"></textarea>
+          <div class="acts"><select id="hqTo"><option value="*">Todos</option>${peers.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}</select><button class="btn small primary" id="hqSend">Mostrar na tela</button></div></details>` : ""}
+      <div class="hlist">${list.map(handRow).join("") || `<p class="hint">${isGM ? "Nada ainda. Crie notas, suba mapas e imagens; depois libere (👁) ou mostre na tela (📢)." : "O mestre ainda não liberou nada aqui."}</p>`}</div>`}</div>`;
+  $("#pClose").onclick = closePanel;
+  $("#hTabs").onclick = e => { const b = e.target.closest("[data-htab]"); if (b) { handTab = b.dataset.htab; openHandPanel(); } };
+  const hq = $("#hQ"); if (hq) hq.oninput = () => { handQ = hq.value; const pos = hq.selectionStart; openHandPanel().then(() => { const n = $("#hQ"); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
+  if (handTab === "mine") {
+    $("#mnAdd").onclick = () => { myNotes.unshift({t: "", body: ""}); saveMyNotes(); openHandPanel(); setTimeout(() => $("[data-mnt='0']")?.focus(), 30); };
+    $("#panel").oninput = e => { const t = e.target; if (t.dataset.mnt != null) myNotes[+t.dataset.mnt].t = t.value; else if (t.dataset.mnb != null) myNotes[+t.dataset.mnb].body = t.value; else return; saveMyNotes(); };
+    $("#panel").onclick = e => { const b = e.target.closest("[data-mndel]"); if (b && confirm("Apagar esta nota?")) { myNotes.splice(+b.dataset.mndel, 1); saveMyNotes(); openHandPanel(); } };
+    return;
+  }
+  $("#panel").oninput = null;
+  if (isGM) {
+    $("#hNewNote").onclick = () => handEditor({id: uid(), cat: "nota", t: "", body: "", url: "", vis: false});
+    $("#hNewImg").onclick = () => handEditor({id: uid(), cat: "mapa", t: "", body: "", url: "", vis: false});
+    $("#hqSend").onclick = () => { const txt = $("#hqTxt").value.trim(); if (!txt) return; const to = $("#hqTo").value; send("pop", {to, item: {t: "Mestre", body: txt}}); toast(to === "*" ? "Mostrado na tela de todos." : `Mostrado na tela de ${to}.`); $("#hqTxt").value = ""; };
+  }
+  $("#panel").onclick = async e => {
+    const b = e.target.closest("button"); if (!b) return; const d = b.dataset, h = (hand || []).find(x => x.id === (d.hopen || d.hvis || d.hpop || d.hedit));
+    if (d.hopen && h) showHandout(h, false);
+    else if (d.hvis && h) { h.vis = !h.vis; await handSave(); openHandPanel(); toast(h.vis ? "Liberado para os jogadores." : "Escondido dos jogadores."); }
+    else if (d.hpop && h) popChooser(h);
+    else if (d.hedit && h) handEditor({...h});
+  };
+}
+function popChooser(h){ // escolhe para quem mostrar
+  const peers = [...new Set(peersOnMap)].filter(n => n);
+  if (!peers.length) { send("pop", {to: "*", item: h}); return toast("Mostrado na tela de todos."); }
+  const box = document.createElement("div"); box.className = "hpopchoose"; box.innerHTML = `<div class="panel" style="position:static;width:auto"><b>Mostrar “${esc(h.t || "item")}” para:</b><div class="acts" style="margin-top:8px;flex-wrap:wrap"><button class="btn small primary" data-to="*">Todos</button>${peers.map(n => `<button class="btn small" data-to="${esc(n)}">${esc(n)}</button>`).join("")}<button class="btn small" data-to="">Cancelar</button></div>${h.vis ? "" : `<label class="chk" style="margin-top:8px"><input type="checkbox" id="hpKeep"> Também deixar liberado no diário</label>`}</div>`;
+  document.body.appendChild(box);
+  box.onclick = async e => { const b = e.target.closest("[data-to]"); if (!b) { if (e.target === box) box.remove(); return; } const to = b.dataset.to; const keep = $("#hpKeep", box)?.checked; box.remove(); if (!to) return;
+    if (keep) { h.vis = true; await handSave(); if (panelKind === "hand") openHandPanel(); }
+    send("pop", {to, item: {t: h.t, body: h.body, url: h.url, cat: h.cat}}); toast(to === "*" ? "Mostrado na tela de todos." : `Mostrado na tela de ${to}.`); };
+}
+function handEditor(h){
+  panelKind = "hand";
+  const isNew = !(hand || []).some(x => x.id === h.id);
+  $("#panel").innerHTML = `<div class="panel hand-panel" role="dialog" aria-label="Editar"><h3>${isNew ? "Novo" : "Editar"} <button class="btn small" id="pClose">Voltar</button></h3>
+    <div class="seg" id="heCat">${Object.entries(HCAT).map(([k, [ic, nm]]) => `<button data-hc="${k}" aria-pressed="${h.cat === k}">${ic} ${nm}</button>`).join("")}</div>
+    <label for="heT">Título</label><input type="text" id="heT" maxlength="80" value="${esc(h.t)}" placeholder="${h.cat === "mapa" ? "Ex.: Mapa do Reino" : "Ex.: Carta do barão"}">
+    <label>Imagem (opcional para notas)</label>
+    <div class="heimg">${h.url ? `<img src="${esc(h.url)}" alt="">` : `<span>Arraste uma imagem aqui ou escolha um arquivo</span>`}</div>
+    <div class="acts"><label class="btn small" style="margin:0">Arquivo…<input type="file" id="heFile" accept="image/*" hidden></label><input type="url" id="heUrl" placeholder="ou cole um link" value="${esc(h.url || "")}" style="flex:1">${h.url ? `<button class="btn small" id="heNoImg">Tirar</button>` : ""}</div>
+    <label for="heB">Texto</label><textarea id="heB" rows="7" placeholder="Anotações, descrição, carta, pista…">${esc(h.body || "")}</textarea>
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="heVis" ${h.vis ? "checked" : ""}> Jogadores podem ver no diário</label>
+    <div class="acts foot">${isNew ? "" : `<button class="btn small danger" id="heDel">Apagar</button>`}<span class="spacer"></span><button class="btn" id="heCancel">Cancelar</button><button class="btn primary" id="heSave">Salvar</button></div></div>`;
+  const back = () => openHandPanel();
+  $("#pClose").onclick = $("#heCancel").onclick = back;
+  const keep = () => { h.t = $("#heT").value; h.body = $("#heB").value; h.url = $("#heUrl").value.trim(); h.vis = $("#heVis").checked; };
+  $("#heCat").onclick = e => { const b = e.target.closest("[data-hc]"); if (b) { keep(); h.cat = b.dataset.hc; handEditor(h); } };
+  const up = async f => { if (!f || !f.type.startsWith("image/")) return; keep(); toast("Enviando…"); try { h.url = await uploadImage(f, "handouts"); if (!h.t) h.t = f.name.replace(/\.\w+$/, "").slice(0, 80); handEditor(h); toast("Imagem pronta."); } catch (err) { toast("Não enviei: " + err.message); } };
+  $("#heFile").onchange = e => up(e.target.files[0]);
+  const zone = $(".heimg"); zone.ondragover = e => { e.preventDefault(); zone.classList.add("over"); }; zone.ondragleave = () => zone.classList.remove("over"); zone.ondrop = e => { e.preventDefault(); zone.classList.remove("over"); up([...e.dataTransfer.files][0]); };
+  if ($("#heNoImg")) $("#heNoImg").onclick = () => { keep(); h.url = ""; handEditor(h); };
+  $("#heUrl").onchange = () => { keep(); setTimeout(() => handEditor(h), 0); };
+  $("#heSave").onclick = async () => { keep(); if (!h.t && !h.body && !h.url) return toast("Escreva algo ou coloque uma imagem."); h.at = Date.now(); hand = (hand || []).filter(x => x.id !== h.id).concat([h]); await handSave(); back(); };
+  if ($("#heDel")) $("#heDel").onclick = async () => { if (!confirm("Apagar este item?")) return; hand = hand.filter(x => x.id !== h.id); await handSave(); back(); };
+}
+function showHandout(h, pushed){ // janela grande: imagem com zoom e texto
+  const ov = document.createElement("div"); ov.className = "hview" + (pushed ? " pushed" : "");
+  ov.innerHTML = `<div class="hvbox" role="dialog" aria-label="${esc(h.t || "Mensagem")}">
+    <div class="hvhead"><b>${pushed ? "📢 " : ""}${esc(h.t || "Mensagem do mestre")}</b><span class="spacer"></span>${h.url ? `<button class="btn small" data-z="-1">－</button><button class="btn small" data-z="0">Ajustar</button><button class="btn small" data-z="1">＋</button><a class="btn small" href="${esc(h.url)}" target="_blank" rel="noopener">Abrir</a>` : ""}<button class="btn small primary" data-close>Fechar</button></div>
+    ${h.url ? `<div class="hvimg"><img src="${esc(h.url)}" alt="" draggable="false"></div>` : ""}
+    ${h.body ? `<div class="hvtxt">${esc(h.body).replace(/\n/g, "<br>")}</div>` : ""}</div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener("click", e => { if (e.target === ov || e.target.closest("[data-close]")) close(); });
+  const onKey = e => { if (e.key === "Escape") { close(); removeEventListener("keydown", onKey, true); e.stopPropagation(); } }; addEventListener("keydown", onKey, true);
+  const box = $(".hvimg", ov), img = box && $("img", box);
+  if (img) { // zoom com a roda e arrastar para mover
+    let z = 1, x = 0, y = 0, dr = null; const ap = () => img.style.transform = `translate(${x}px,${y}px) scale(${z})`;
+    box.onwheel = e => { e.preventDefault(); z = Math.max(.3, Math.min(8, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); ap(); };
+    box.onpointerdown = e => { dr = [e.clientX - x, e.clientY - y]; box.setPointerCapture(e.pointerId); };
+    box.onpointermove = e => { if (dr) { x = e.clientX - dr[0]; y = e.clientY - dr[1]; ap(); } };
+    box.onpointerup = () => dr = null;
+    ov.querySelectorAll("[data-z]").forEach(b => b.onclick = () => { const k = +b.dataset.z; if (!k) { z = 1; x = y = 0; } else z = Math.max(.3, Math.min(8, z * (k > 0 ? 1.3 : 1 / 1.3))); ap(); });
+  }
+  if (pushed && DS.init()) { const t = DS.ctx.currentTime; DS.tone(t, 660, .25, .12, "sine"); DS.tone(t + .12, 990, .35, .1, "sine"); }
+}
+
 // ---------- pings (Alt + clique) ----------
 let pings = [];
 const nameColor = n => { let h = 0; for (const ch of String(n)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 75% 62%)`; };
@@ -2230,7 +2380,7 @@ function endPointer(e){
   if (d.kind === "propsize") { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); toast(`Tamanho: ${String(d.t.pw).replace(".", ",")} × ${String(d.t.ph).replace(".", ",")} casas`, 1400); } return; }
   if (d.kind === "rotate") {
     if (isProp(d.t)) { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); } return; }
-    if (d.moved) { const t = d.t; delete tokLive[t.id]; if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else send("tokreq", {id: t.id, a: t.a, who: myNick}); }
+    if (d.moved) { const t = d.t; delete tokLive[t.id]; if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else tokReq({id: t.id, a: t.a, who: myNick}); }
     return;
   }
   if (d.kind === "token") {
@@ -2238,7 +2388,7 @@ function endPointer(e){
       const [x, y] = d.grid ? [d.t.x, d.t.y] : d.t.sn === false ? [Math.round(d.t.x), Math.round(d.t.y)] : snapPoint(d.t.x, d.t.y, d.t.s || 1);
       d.t.x = x; d.t.y = y; delete tokLive[d.t.id];
       if (isGM) { if (x !== d.ox || y !== d.oy) pushTrail(d.t, d.grid ? [[d.ox, d.oy], ...d.path.slice(1).map(c => cellCenter(...c))] : [[d.ox, d.oy], [x, y]]); send("tok", {id: d.t.id, x, y}); save("tokens"); }
-      else if (x !== d.ox || y !== d.oy) send("tokreq", {id: d.t.id, x, y, who: myNick, path: [[d.ox, d.oy], ...d.path.slice(1).map(c => cellCenter(...c).map(v => Math.round(v * 10) / 10))]});
+      else if (x !== d.ox || y !== d.oy) tokReq({id: d.t.id, x, y, who: myNick, path: [[d.ox, d.oy], ...d.path.slice(1).map(c => cellCenter(...c).map(v => Math.round(v * 10) / 10))]});
     }
     dirty = true; return;
   }
@@ -2258,7 +2408,7 @@ function rotateSel(dir){
   const t = tokens.find(x => x.id === selTok); if (!t || !(isGM || owns(t))) return;
   const step = isProp(t) ? 90 : G().type === "hex" ? 60 : 45; t.a = (((t.a || 0) + dir * step) % 360 + 360) % 360; dirty = true;
   if (isProp(t)) { const [x, y] = snapProp(t, t.x, t.y); t.x = x; t.y = y; save("tokens"); return; }
-  if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else send("tokreq", {id: t.id, a: t.a, who: myNick});
+  if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else tokReq({id: t.id, a: t.a, who: myNick});
 }
 addEventListener("keydown", e => {
   if (e.target.closest?.("input,textarea,select")) return;
@@ -2346,7 +2496,7 @@ function undo(redo){
   setCol(e.col, e.json); toast(redo ? "Refeito." : "Desfeito.", 1200);
   if (panelKind === "scene") openScenePanel(true); if (flyKind) openFlyout(flyKind);
 }
-function save(col, undoable = true){
+function save(col, undoable = true, delay){
   if (!isGM) return;
   if (undoable) pushUndo(col, undoable === "merge");
   if (col === "tokens" || col === "scene") updateExplored();
@@ -2357,7 +2507,7 @@ function save(col, undoable = true){
     const {error} = await sb.from("map_state").update({[col]: val, updated_at: new Date().toISOString()}).eq("id", 1);
     if (error) return toast("Não salvei o mapa: " + error.message);
     try { if (JSON.stringify(val).length < 180000) send("state", {col, val}); } catch {}  // entrega na hora, sem depender só do banco
-  }, col === "fog" ? 150 : 60);
+  }, delay || (col === "fog" ? 150 : 60));
 }
 async function load(){
   const {data, error} = await sb.from("map_state").select("*").eq("id", 1).maybeSingle();
@@ -2373,6 +2523,7 @@ function apply(d){
   if (d.scene) wallsVer++;
   if (d.fog && fresh("fog") && !(drag?.kind?.startsWith("fog"))) fog = {on: !!d.fog.on, cells: d.fog.cells || {}, sig: d.fog.sig, exImg: d.fog.exImg || null, exBox: d.fog.exBox || null};
   if (d.drawings && fresh("drawings") && drag?.kind !== "draw") drawings = d.drawings;
+  if (!isGM) fixPending();
   dirty = true; drawTop(); drawEmpty();
 }
 
@@ -2381,8 +2532,9 @@ function setTool(t){ tool = t; wallDraft = null; cv.className = "t-" + (t === "w
 function drawTools(){
   const btn = (t, icon, label, key) => `<button class="tool" data-tool="${t}" aria-pressed="${tool === t}" title="${label} (${key.toUpperCase()})" aria-label="${label}">${icon}<span class="k">${key.toUpperCase()}</span></button>`;
   $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r") + btn("spell", I.spell, "Áreas de magia", "m")
+    + (!isGM ? `<hr><button class="tool" id="pMaps" title="Mapas que o mestre liberou" aria-label="Mapas">${I.maps}<i class="tdot" hidden></i></button><button class="tool" id="pNotes" title="Anotações: o que o mestre liberou e as suas notas" aria-label="Anotações">${I.notes}<i class="tdot" hidden></i></button>` : "")
     + (isGM ? btn("draw", I.draw, "Desenhar e marcar áreas", "d") + btn("erase", I.erase, "Borracha (apaga desenhos)", "e") + btn("fog", I.fog, "Névoa de guerra", "f") + btn("wall", I.wall, "Paredes e portas (bloqueiam luz e visão)", "w")
-      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
+      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="handBtn" title="Anotações, mapas e imagens (libere para os jogadores ou mostre na tela deles)" aria-label="Anotações">${I.notes}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
   $("#tools").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.tool) setTool(b.dataset.tool);
@@ -2391,6 +2543,8 @@ function drawTools(){
     else if (b.id === "assetsBtn") panelKind === "assets" ? closePanel() : openAssets();
     else if (b.id === "genBtn") panelKind === "gen" ? closePanel() : openGenPanel();
     else if (b.id === "mapsBtn") panelKind === "maps" ? closePanel() : openMapsPanel();
+    else if (b.id === "handBtn") panelKind === "hand" ? closePanel() : openHandPanel();
+    else if (b.id === "pMaps" || b.id === "pNotes") { b.querySelector(".tdot").hidden = true; if (panelKind === "hand" && handTab === (b.id === "pMaps" ? "mapa" : "nota")) closePanel(); else openHandPanel(b.id === "pMaps" ? "mapa" : "nota"); }
     else if (b.id === "sceneBtn") panelKind === "scene" ? closePanel() : openScenePanel();
   };
 }
@@ -3017,15 +3171,34 @@ async function boot(){
   chan.on("broadcast", {event: "tok"}, ({payload: p}) => {
     if (!p?.id) return;
     if (p.live) tokLive[p.id] = p.a != null ? {x: p.x, y: p.y, a: p.a} : {x: p.x, y: p.y};
-    else { delete tokLive[p.id]; const t = tokens.find(x => x.id === p.id); if (t) { t.x = p.x; t.y = p.y; if (p.a != null) t.a = p.a; } }
+    else {
+      if (!isGM && p.q != null && lastReq[p.id] && p.q < lastReq[p.id]) return;   // resposta a um pedido antigo: ignora
+      delete tokLive[p.id]; if (!isGM) delete pend[p.id];
+      const t = tokens.find(x => x.id === p.id); if (t && !(walking === t.id)) { t.x = p.x; t.y = p.y; if (p.a != null) t.a = p.a; }
+    }
     dirty = true;
+  });
+  chan.on("broadcast", {event: "hand"}, async () => { // o mestre mudou as anotações
+    if (isGM) return; const before = new Set(handVisible().map(h => h.id + (h.at || ""))); await handLoad();
+    const fresh = handVisible().filter(h => !before.has(h.id + (h.at || "")));
+    if (fresh.length) { toast(`📜 O mestre liberou: ${fresh.map(h => h.t || "item").slice(0, 3).join(", ")}`); for (const h of fresh) { const b = $(h.cat === "mapa" ? "#pMaps" : "#pNotes"); if (b) b.querySelector(".tdot").hidden = false; } }
+    if (panelKind === "hand") openHandPanel();
+  });
+  chan.on("broadcast", {event: "pop"}, ({payload: p}) => { // o mestre jogou algo na tela
+    if (isGM || !p?.item) return; if (p.to !== "*" && String(p.to || "").toLowerCase() !== String(myNick || "").toLowerCase()) return;
+    showHandout(p.item, true);
+  });
+  chan.on("broadcast", {event: "doorres"}, ({payload: p}) => { // resposta do mestre sobre uma porta
+    if (isGM || !p?.k) return; delete pendDoor[p.k];
+    const w = walls().find(x => x.d && x.p?.join(",") === p.k); if (w && (w.o ? 1 : 0) !== p.o) { w.o = p.o; wallsVer++; losCache.clear(); dirty = true; }
   });
   chan.on("broadcast", {event: "door"}, ({payload: p}) => { // jogador abriu/fechou uma porta: o mestre confere
     if (!isGM || !p?.k) return;
     const w = walls().find(x => x.d && !x.s && x.p?.join(",") === p.k); if (!w) return;
     const who = String(p.who || "").toLowerCase();
-    if (!tokens.some(t => !isProp(t) && t.o && (t.o === "*" || t.o.toLowerCase() === who) && nearDoor(t, w))) return save("scene", false);
-    w.o = w.o ? 0 : 1; wallsChanged(); toast(`${p.who || "Jogador"} ${w.o ? "abriu" : "fechou"} uma porta.`, 1800);
+    const near = t => { const [mx, my] = doorMid(w), L = tokLive[t.id] || t; return Math.hypot(L.x - mx, L.y - my) <= G().size * 2.6 + tokR(t); };   // o mestre é mais tolerante (atraso da rede)
+    if (!tokens.some(t => !isProp(t) && t.o && (t.o === "*" || t.o.toLowerCase() === who) && near(t))) return send("doorres", {k: p.k, o: w.o ? 1 : 0});
+    w.o = w.o ? 0 : 1; wallsChanged(); send("doorres", {k: p.k, o: w.o}); toast(`${p.who || "Jogador"} ${w.o ? "abriu" : "fechou"} uma porta.`, 1800);
   });
   chan.on("broadcast", {event: "tokreq"}, ({payload: p}) => { // jogador moveu/girou o próprio token: o mestre confere e salva
     if (!isGM || !p?.id) return;
@@ -3033,12 +3206,12 @@ async function boot(){
     if (t.o !== "*" && String(p.who || "").toLowerCase() !== t.o.toLowerCase()) return;
     if (p.x != null) {
       const [x, y] = t.sn === false ? [Math.round(p.x), Math.round(p.y)] : snapPoint(p.x, p.y, t.s || 1);
-      if (!validPath(t, p.path)) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); return; } // caminho inválido (parede ou longe demais): devolve
+      if (!validPath(t, p.path)) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a, q: p.q}); return; } // caminho inválido (parede ou longe demais): devolve
       pushTrail(t, p.path); t.x = x; t.y = y;
     }
     if (p.a != null) t.a = ((+p.a % 360) + 360) % 360;
     if (p.bi != null && t.b?.[p.bi] && isFinite(+p.bv)) t.b[p.bi].v = Math.round(+p.bv);
-    delete tokLive[t.id]; send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); dirty = true;
+    delete tokLive[t.id]; send("tok", {id: t.id, x: t.x, y: t.y, a: t.a, q: p.q}); save("tokens", true, 600); dirty = true;
   });
   chan.on("presence", {event: "sync"}, () => {
     const st = chan.presenceState();
