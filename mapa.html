@@ -175,7 +175,7 @@ input[type=range]{accent-color:var(--brass);width:100%}
 .dlog{position:fixed;left:10px;bottom:10px;z-index:8;display:flex;flex-direction:column;gap:6px;width:min(300px,calc(100vw - 20px));max-height:44vh;overflow:auto;pointer-events:none}
 .dlog > *{pointer-events:auto}
 .dicebar{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);z-index:8;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 640px);min-width:min(420px,calc(100vw - 20px))}
-@media (max-width:1100px){.dicebar{max-width:calc(100vw - 20px);bottom:auto;top:58px}}
+
 .dice-main{flex:none;font-weight:700;font-size:16px;padding:10px 18px;background:linear-gradient(180deg,#e0b95e,#b8892f);color:var(--brass-ink);border-color:#e0b95e;box-shadow:0 8px 22px rgba(0,0,0,.45)}
 .dice-main:hover{filter:brightness(1.08);background:linear-gradient(180deg,#e0b95e,#b8892f)}
 .presets{display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin;padding:2px}
@@ -522,7 +522,34 @@ input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:tex
 
 /* barra do token selecionado fica acima da barra de atalhos */
 .selbar{bottom:126px}
-@media (max-width:1100px){.selbar{bottom:14px}}
+
+/* v21: rolagem conjunta de iniciativa, entrada da barra de turnos, telas pequenas */
+.inistage{position:fixed;inset:0;z-index:35;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,rgba(20,14,8,.55),rgba(5,4,3,.82));animation:dIn .25s ease-out;cursor:default}
+.inistage.out{opacity:0;transition:opacity .3s}
+.is-card{display:flex;flex-direction:column;align-items:center;gap:14px;max-width:calc(100vw - 30px)}
+.is-title{font:700 28px var(--display);color:var(--brass);text-shadow:0 2px 10px #000}
+.is-row{display:flex;flex-wrap:wrap;justify-content:center;gap:18px 22px}
+.is-one{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:80px;animation:isIn .45s cubic-bezier(.2,1.4,.4,1) both;animation-delay:calc(var(--i) * 60ms)}
+.is-one .die.huge{width:64px;height:64px}.is-one .die.huge .die-n{font-size:24px}
+.is-one.hid{opacity:.7}
+.is-tot{font:700 26px var(--display);color:#fff;min-height:30px;text-shadow:0 2px 8px #000}
+.is-one.done .is-tot{animation:isPop .35s ease-out}
+.is-n{font:600 13px var(--body);color:var(--ink);text-shadow:0 1px 3px #000;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes isIn{from{opacity:0;transform:translateY(40px) scale(.6) rotate(-30deg)}to{opacity:1;transform:none}}
+@keyframes isPop{from{transform:scale(1.8);color:#ffd76a}to{transform:scale(1)}}
+.turnbar.intro .tb-p{animation:tbIn .5s cubic-bezier(.2,1.5,.4,1) both}
+@keyframes tbIn{from{opacity:0;transform:translateY(-70px) scale(.4) rotate(-12deg)}60%{opacity:1}to{opacity:1;transform:none}}
+.turnbar.intro .tb-p.on{animation-name:tbInOn}
+@keyframes tbInOn{from{opacity:0;transform:translateY(-70px) scale(.4)}to{opacity:1;transform:scale(1.14)}}
+/* barra de ferramentas: vira duas colunas quando a tela é baixa */
+.tools{display:grid;grid-auto-flow:column;grid-auto-columns:44px;gap:4px}
+.tools hr{display:none}
+@media (max-height:760px){.tools{grid-auto-columns:38px;gap:3px;padding:4px}.tool{width:38px;height:38px}.tool svg{width:21px;height:21px}}
+@media (max-width:1100px){.dicebar{bottom:8px;top:auto;max-width:calc(100vw - 20px);gap:6px}.dice-main{padding:8px 10px;font-size:14px}.dlog{bottom:112px}.vdock{bottom:auto;top:100px}.selbar{bottom:112px}}
+@media (max-width:760px){.dice-main{font-size:12px;padding:8px}.hotbar{grid-template-columns:repeat(10,30px);grid-auto-rows:30px}.hbs{width:30px;height:30px}.hbe{font-size:14px;margin-top:3px}.hbn{display:none}}
+
+.topbar{left:calc(var(--toolsW, 64px) + 10px)}
+.dlog{left:calc(var(--toolsW, 64px) + 12px)}
 </style>
 </head>
 <body>

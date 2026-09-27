@@ -2219,13 +2219,40 @@ function iniMod(t){ // bônus de iniciativa: pega do nome da barra "Ini"/"Inic" 
 function iniAdd(t){ const I = INI(); if (I.list.some(e => e.tk === t.id)) return false; const m = iniMod(t); I.list.push({id: uid(), tk: t.id, n: t.n || "Token", f: `1d20${m ? (m > 0 ? "+" : "") + m : ""}`, v: null, hid: !!t.h}); return true; }
 function iniSave(){ save("scene"); drawTurnBar(); dirty = true; if (panelKind === "ini") openIniPanel(); }
 const INI_GRAY = "#8a8a90";
-function iniRoll(e, show = true){
+function iniRoll(e){ // rola a iniciativa e devolve o que mostrar
   let r; try { r = rollFormula(e.f || "1d20"); } catch { r = rollFormula("1d20"); }
-  e.v = r.total; if (!show) return r;
-  const t = iniTok(e), col = t?.o ? (t.c || "#d0a54c") : INI_GRAY, hid = e.hid || t?.h;
-  const roll = {id: uid(), v: MAP_VER, who: e.n || "Criatura", label: "Iniciativa", ...r, secret: !!hid, snd: null, col};
-  if (!hid) send("roll", roll); addRoll(roll, false);
-  return r;
+  e.v = r.total; const t = iniTok(e);
+  return {n: e.n || "Criatura", col: t?.o ? (t.c || "#d0a54c") : INI_GRAY, hid: !!(e.hid || t?.h), f: r.f, dice: r.dice, mod: r.mod, total: r.total};
+}
+function iniShow(items){ // todos os dados de uma vez na tela (e no histórico)
+  if (!items.length) return;
+  const pub = items.filter(x => !x.hid);
+  if (pub.length) send("inistage", {items: pub});
+  iniStage(items);
+}
+function iniStage(items){
+  $("#iniStage")?.remove();
+  const st = document.createElement("div"); st.id = "iniStage"; st.className = "inistage"; st.setAttribute("role", "dialog"); st.setAttribute("aria-label", "Rolagem de iniciativa");
+  st.innerHTML = `<div class="is-card"><div class="is-title">⚔️ Iniciativa</div>
+    <div class="is-row">${items.map((x, i) => `<div class="is-one ${x.hid ? "hid" : ""}" style="--i:${i}">${x.dice.filter(d => !d.x).slice(0, 2).map(d => dieEl(d.d, "?", "huge rolling", x.col)).join("")}<b class="is-tot"></b><span class="is-n">${esc(x.n)}${x.hid ? " 🚫" : ""}</span></div>`).join("")}</div>
+    <div class="ds-hint"></div></div>`;
+  document.body.appendChild(st);
+  const ones = [...st.querySelectorAll(".is-one")], t0 = performance.now(), land = items.map((_, i) => 900 + i * 170), end = Math.max(...land) + 200;
+  DS.rattle(Math.min(8, items.length * 2)); let landed = 0;
+  const tick = now => {
+    if (!st.isConnected) return; const el = now - t0;
+    ones.forEach((o, i) => { if (o.classList.contains("done")) return; const dice = [...o.querySelectorAll(".die")], x = items[i], real = x.dice.filter(d => !d.x);
+      if (el >= land[i]) { o.classList.add("done"); dice.forEach((d, k) => { d.classList.remove("rolling"); d.classList.add("landed"); d.querySelector(".die-n").textContent = real[k]?.v ?? "?"; if (real[k]?.d === 20 && real[k].v === 20) d.classList.add("c20"); if (real[k]?.d === 20 && real[k].v === 1) d.classList.add("c1"); }); o.querySelector(".is-tot").textContent = x.total; DS.land(); landed++; }
+      else dice.forEach(d => { d.querySelector(".die-n").textContent = 1 + Math.floor(Math.random() * 20); }); });
+    if (el < end) return requestAnimationFrame(tick);
+    DS.reveal(); st.querySelector(".ds-hint").textContent = "clique para fechar";
+    for (const x of items) if (isGM || !x.hid) diceLog.push({id: uid(), who: x.n, label: "Iniciativa", f: x.f, dice: x.dice, mod: x.mod, total: x.total, col: x.col, fresh: false, secret: x.hid});
+    while (diceLog.length > 50) diceLog.shift(); drawDiceLog(true);
+    setTimeout(close, 3200);
+  };
+  requestAnimationFrame(tick);
+  const close = () => { if (!st.isConnected) return; st.classList.add("out"); setTimeout(() => st.remove(), 300); };
+  st.onclick = () => { if (st.querySelector(".ds-hint").textContent) close(); };
 }
 function iniGo(step){ // próximo / anterior turno
   const I = INI(); if (!I.list.length) return;
@@ -2256,11 +2283,11 @@ function openIniPanel(){
   $("#iAddAll").onclick = () => { let n = 0; for (const t of tokens) if (!isProp(t) && iniAdd(t)) n++; if (!n) toast("Todos os tokens do mapa já estão no combate."); iniSave(); };
   $("#iAddSel").onclick = () => { const t = tokens.find(x => x.id === selTok && !isProp(x)); if (!t) return toast("Selecione um token no mapa primeiro."); if (!iniAdd(t)) toast("Ele já está no combate."); iniSave(); };
   $("#iAddNew").onclick = () => { INI().list.push({id: uid(), tk: null, n: "Criatura", f: "1d20", v: null, hid: false}); iniSave(); };
-  $("#iRollAll").onclick = () => { for (const e of INI().list) if (e.v == null || !I.on) iniRoll(e); iniSort(); iniSave(); toast("Iniciativas roladas e ordenadas."); };
+  $("#iRollAll").onclick = () => { const shown = []; for (const e of INI().list) if (e.v == null || !I.on) shown.push(iniRoll(e)); iniShow(shown); iniSort(); iniSave(); };
   $("#iSort").onclick = () => { iniSort(); iniSave(); };
   $("#iClear").onclick = () => { if (confirm("Tirar todo mundo da lista de iniciativa?")) { scene.init = {on: false, round: 1, cur: 0, list: []}; iniSave(); } };
   $("#iAsk").onclick = () => { const L = I.list.filter(e => iniOwner(e)).map(e => ({id: e.id, n: e.n, f: e.f, o: iniOwner(e)})); if (!L.length) return toast("Nenhum token de jogador na lista (dê um dono ao token)."); send("iniask", {list: L}); toast("Pedido enviado: os jogadores vão rolar."); };
-  if ($("#iStart")) $("#iStart").onclick = () => { for (const e of I.list) if (e.v == null) iniRoll(e); iniSort(); Object.assign(I, {on: true, round: 1, cur: 0}); iniSave(); send("turnfx", {start: 1}); };
+  if ($("#iStart")) $("#iStart").onclick = () => { const shown = []; for (const e of I.list) if (e.v == null) shown.push(iniRoll(e)); iniShow(shown); iniSort(); Object.assign(I, {on: true, round: 1, cur: 0, go: Date.now()}); iniSave(); };
   if ($("#iNext")) $("#iNext").onclick = () => iniGo(1);
   if ($("#iPrev")) $("#iPrev").onclick = () => iniGo(-1);
   if ($("#iEnd")) $("#iEnd").onclick = () => { I.on = false; iniSave(); toast("Combate encerrado."); };
@@ -2269,7 +2296,7 @@ function openIniPanel(){
     clearTimeout(P._t); P._t = setTimeout(() => { save("scene", "merge"); drawTurnBar(); }, 400); };
   P.onkeydown = e => e.stopPropagation();
   P.onclick = e => { const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
-    if (d.ir != null) { const en = I.list[+d.ir]; iniRoll(en); iniSave(); }
+    if (d.ir != null) { const en = I.list[+d.ir]; iniShow([iniRoll(en)]); iniSave(); }
     else if (d.ih != null) { const en = I.list[+d.ih]; en.hid = !en.hid; iniSave(); }
     else if (d.ix != null) { const i = +d.ix; I.list.splice(i, 1); if (I.cur >= I.list.length) I.cur = 0; else if (i < I.cur) I.cur--; iniSave(); } };
   // arrastar as linhas para reordenar
@@ -2283,7 +2310,9 @@ let lastTurnKey = "";
 function drawTurnBar(){
   const I = scene.init; let el = $("#turnBar");
   if (!I?.on || !I.list?.length) { el?.remove(); lastTurnKey = ""; return; }
-  if (!el) { el = document.createElement("div"); el.id = "turnBar"; el.className = "turnbar"; document.body.appendChild(el); }
+  let intro = false;
+  if (!el) { el = document.createElement("div"); el.id = "turnBar"; el.className = "turnbar"; document.body.appendChild(el); intro = true; }
+  if (I.go && I.go !== el._go) { el._go = I.go; intro = intro || Date.now() - I.go < 20000; }
   const vis = I.list.map((e, i) => ({e, i})).filter(x => isGM || !x.e.hid), cur = I.list[I.cur];
   const curVis = isGM || !cur?.hid;
   el.innerHTML = `<div class="tb-round">Rodada <b>${I.round}</b></div>
@@ -2293,6 +2322,11 @@ function drawTurnBar(){
         ${isGM || t?.o ? (t?.b?.[0] ? `<span class="tb-hp"><i style="width:${Math.max(0, Math.min(100, (+t.b[0].v || 0) / Math.max(1, +t.b[0].m || 1) * 100))}%"></i></span>` : "") : ""}
         <span class="tb-n">${esc(e.n)}</span>${on ? `<span class="tb-arrow">▲</span>` : ""}</button>`; }).join("")}</div>
     ${isGM ? `<button class="tb-nav next" id="tbNext" title="Próximo turno">▶</button>` : cur && iniMine(cur) ? `<button class="btn small primary tb-end" id="tbEnd">✔ Terminar meu turno</button>` : ""}`;
+  if (intro) { // cada personagem entra na barra na ordem da iniciativa
+    el.classList.add("intro"); const ps = [...el.querySelectorAll(".tb-p")];
+    ps.forEach((p, k) => { p.style.animationDelay = (0.35 + k * 0.28) + "s"; setTimeout(() => { if (DS.init()) DS.tone(DS.ctx.currentTime, 330 + k * 55, .12, .08, "triangle"); }, 350 + k * 280); });
+    setTimeout(() => el.classList.remove("intro"), 900 + ps.length * 280);
+  }
   if (isGM) { $("#tbPrev").onclick = () => iniGo(-1); $("#tbNext").onclick = () => iniGo(1); }
   const te = $("#tbEnd"); if (te) te.onclick = () => { send("endturn", {id: cur.id, who: myNick}); te.disabled = true; te.textContent = "…"; };
   el.querySelector(".tb-list").onclick = e => { const b = e.target.closest("[data-tb]"); if (!b) return; const t = iniTok(I.list[+b.dataset.tb]); if (t && (isGM || !t.h)) centerOn(t.x, t.y, Math.max(cam.z, .8)); if (isGM && e.detail === 2) openIniPanel(); };
@@ -2822,6 +2856,14 @@ function apply(d){
 
 // ---------- interface ----------
 function setTool(t){ tool = t; wallDraft = null; cv.className = "t-" + (t === "wall" || t === "spell" ? "draw" : t); drawTools(); if ((["draw", "fog", "wall"].includes(t) && isGM) || t === "spell") openFlyout(t); else closeFlyout(); dirty = true; }
+function fitTools(){ // barra da esquerda: quebra em colunas quando a tela é baixa, e o resto da tela se afasta dela
+  const el = $("#tools"); if (!el) return;
+  const n = el.querySelectorAll(".tool").length, sz = innerHeight < 760 ? 38 : 44, gap = innerHeight < 760 ? 3 : 4;
+  const rows = Math.max(3, Math.min(n, Math.floor((innerHeight - 90) / (sz + gap))));
+  el.style.gridTemplateRows = `repeat(${rows}, ${sz}px)`;
+  requestAnimationFrame(() => document.documentElement.style.setProperty("--toolsW", Math.round(el.getBoundingClientRect().right) + "px"));
+}
+addEventListener("resize", () => fitTools());
 function drawTools(){
   const btn = (t, icon, label, key) => `<button class="tool" data-tool="${t}" aria-pressed="${tool === t}" title="${label} (${key.toUpperCase()})" aria-label="${label}">${icon}<span class="k">${key.toUpperCase()}</span></button>`;
   $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r") + btn("spell", I.spell, "Áreas de magia", "m")
@@ -2841,6 +2883,7 @@ function drawTools(){
     else if (b.id === "pMaps" || b.id === "pNotes") { b.querySelector(".tdot").hidden = true; if (panelKind === "hand" && handTab === (b.id === "pMaps" ? "mapa" : "nota")) closePanel(); else openHandPanel(b.id === "pMaps" ? "mapa" : "nota"); }
     else if (b.id === "sceneBtn") panelKind === "scene" ? closePanel() : openScenePanel();
   };
+  fitTools();
 }
 function drawTop(){
   $("#topbar").innerHTML = `<div class="title">${EDIT_ID ? "✏️ " + esc(scene.lib?.n || "Mapa") : isGM && scene.libName ? esc(scene.libName) : "Mapa da mesa"}<small>${EDIT_ID ? "editando · jogadores não veem" : isGM ? "mestre" : esc(myNick || "jogador")}</small></div><span class="spacer"></span>
@@ -3514,6 +3557,8 @@ async function boot(){
     const o = String(iniOwner(e) || "").toLowerCase(); if (o !== "*" && o !== String(p.who || "").toLowerCase()) return;
     e.v = +p.v || 0; if (!I.on) iniSort(); iniSave();
   });
+  chan.on("broadcast", {event: "inistage"}, ({payload: p}) => { if (isGM || !Array.isArray(p?.items)) return;
+    iniStage(p.items.slice(0, 40).map(x => ({n: String(x.n || "?").slice(0, 24), col: /^#[0-9a-f]{6}$/i.test(x.col || "") ? x.col : INI_GRAY, hid: false, f: String(x.f || "").slice(0, 40), mod: +x.mod || 0, total: +x.total || 0, dice: (x.dice || []).slice(0, 6).map(d => ({d: +d.d, v: +d.v, x: d.x ? 1 : 0}))}))); });
   chan.on("broadcast", {event: "iniask"}, ({payload: p}) => { if (!isGM && Array.isArray(p?.list)) iniAskPrompt(p.list); });
   chan.on("broadcast", {event: "hand"}, async () => { // o mestre mudou as anotações
     if (isGM) return; const before = new Set(handVisible().map(h => h.id + (h.at || ""))); await handLoad();
