@@ -32,6 +32,7 @@ I.list = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-widt
 I.dungeon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 3h7v5h4V3h7v7h-5v4h5v7h-7v-5h-4v5H3v-7h5v-4H3z"/></svg>';
 I.maps = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg>';
 I.notes = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2M9 8h6M9 12h6M9 16h4"/></svg>';
+I.swords = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 17.5 3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2M9.5 17.5 21 6V3h-3L6.5 14.5M11 19l-6-6M8 16l-4 4M5 21l-2-2"/></svg>';
 I.door = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 21V4l10-1v18"/><path d="M3 21h18"/><circle cx="12" cy="12" r="1"/></svg>';
 const COLORS = ["#d0a54c", "#c0473a", "#4a72b8", "#5f9a4a", "#8a5bb0", "#e07b2e", "#e8e2d0", "#222222"];
 
@@ -259,6 +260,7 @@ function paint(){
   const vsP = !isGM ? viewers() : [];
   const seenTok = t => isGM || owns(t) || !vsP.length || vsP.some(v => sees(ts.find(x => x.id === v.id) || v, t.x, t.y, ts));
   for (const t of ts) if (!isProp(t) && (isGM || !t.h) && seenTok(t)) paintToken(t);
+  paintTurnRing(ts);
   if (speakSet.size) for (const t of ts) if (!isProp(t) && t.o && speakSet.has(t.o.toLowerCase()) && (isGM || !t.h) && seenTok(t)) { // quem está falando na voz
     const r = tokR(t) + 5 / cam.z, pulse = .5 + .5 * Math.sin(performance.now() / 120); ctx.save(); ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2); ctx.strokeStyle = `rgba(120,230,140,${.55 + pulse * .4})`; ctx.lineWidth = (3 + pulse * 2) / cam.z; ctx.stroke(); ctx.restore(); }
   // névoa, luz e visão
@@ -2204,6 +2206,123 @@ function vDraw(){
 }
 addEventListener("beforeunload", () => { if (VOICE.on) voiceLeave(); });
 
+// ---------- iniciativa e turnos (barra de retratos estilo Baldur's Gate) ----------
+// scene.init = {on, round, cur, list: [{id, tk, n, f, v, hid}]}
+const INI = () => scene.init || (scene.init = {on: false, round: 1, cur: 0, list: []});
+const iniTok = e => e.tk ? tokens.find(t => t.id === e.tk) : null;
+const iniOwner = e => { const t = iniTok(e); return t?.o || ""; };
+const iniMine = e => { const t = iniTok(e); return !!t && owns(t); };
+function iniSort(){ const I = INI(), curId = I.list[I.cur]?.id; I.list.sort((a, b) => (b.v ?? -99) - (a.v ?? -99)); if (curId) I.cur = Math.max(0, I.list.findIndex(e => e.id === curId)); }
+function iniMod(t){ // bônus de iniciativa: pega do nome da barra "Ini"/"Inic" se existir
+  const b = (t?.b || []).find(x => /^ini/i.test(x.n || "")); return b ? (+b.v || 0) : 0;
+}
+function iniAdd(t){ const I = INI(); if (I.list.some(e => e.tk === t.id)) return false; const m = iniMod(t); I.list.push({id: uid(), tk: t.id, n: t.n || "Token", f: `1d20${m ? (m > 0 ? "+" : "") + m : ""}`, v: null, hid: !!t.h}); return true; }
+function iniSave(){ save("scene"); drawTurnBar(); dirty = true; if (panelKind === "ini") openIniPanel(); }
+function iniRoll(e){ try { const r = rollFormula(e.f || "1d20"); e.v = r.total; return r; } catch { e.v = rd(20); return null; } }
+function iniGo(step){ // próximo / anterior turno
+  const I = INI(); if (!I.list.length) return;
+  I.cur += step;
+  if (I.cur >= I.list.length) { I.cur = 0; I.round++; toast(`⚔️ Rodada ${I.round}`, 1600); }
+  if (I.cur < 0) { I.cur = I.list.length - 1; I.round = Math.max(1, I.round - 1); }
+  const t = iniTok(I.list[I.cur]); if (t && t.tr?.length) { t.tr = []; save("tokens"); }   // rastro do novo turno começa limpo
+  iniSave();
+}
+function openIniPanel(){
+  panelKind = "ini"; const I = INI();
+  const row = (e, i) => { const t = iniTok(e); return `<div class="irow ${I.on && i === I.cur ? "cur" : ""} ${e.hid ? "hid" : ""}" data-ii="${i}" draggable="true">
+      <span class="iport" style="--pc:${esc(t?.c || "#6b5a44")}">${t?.img ? `<img src="${esc(t.img)}" alt="">` : esc((e.n || "?").slice(0, 2).toUpperCase())}</span>
+      <input class="in" data-in="${i}" value="${esc(e.n)}" maxlength="24" aria-label="Nome">
+      <input class="if" data-if="${i}" value="${esc(e.f)}" maxlength="20" aria-label="Fórmula" title="Fórmula da iniciativa">
+      <input class="iv" data-iv="${i}" value="${e.v ?? ""}" inputmode="numeric" aria-label="Iniciativa" title="Iniciativa">
+      <button class="btn small ic" data-ir="${i}" title="Rolar esta">🎲</button>
+      <button class="btn small ic" data-ih="${i}" title="${e.hid ? "Oculto dos jogadores" : "Jogadores veem"}">${e.hid ? "🚫" : "👁"}</button>
+      <button class="btn small ic danger" data-ix="${i}" title="Tirar do combate">✕</button></div>`; };
+  $("#panel").innerHTML = `<div class="panel ini-panel" role="dialog" aria-label="Iniciativa"><h3>Iniciativa ${I.on ? `<small class="iround">Rodada ${I.round}</small>` : ""}<button class="btn small" id="pClose">Fechar</button></h3>
+    <div class="acts"><button class="btn small" id="iAddAll" title="Todos os personagens e criaturas do mapa (não os objetos)">＋ Tokens do mapa</button><button class="btn small" id="iAddSel" title="O token selecionado no mapa">＋ Selecionado</button><button class="btn small" id="iAddNew">＋ Manual</button></div>
+    <div class="ihead"><span></span><span>Nome</span><span>Teste</span><span>Init</span></div>
+    <div class="ilist" id="iList">${I.list.map(row).join("") || `<p class="hint">Ninguém no combate ainda. Adicione tokens acima.</p>`}</div>
+    <div class="acts"><button class="btn small" id="iRollAll">🎲 Rolar todos</button><button class="btn small" id="iAsk" title="Os jogadores rolam a iniciativa dos próprios personagens">📣 Pedir aos jogadores</button><button class="btn small" id="iSort">↕ Ordenar</button><span class="spacer"></span><button class="btn small danger" id="iClear">Limpar</button></div>
+    <div class="acts foot">${I.on ? `<button class="btn" id="iPrev">⏮</button><button class="btn primary" id="iNext">Próximo turno ⏭</button><span class="spacer"></span><button class="btn danger" id="iEnd">Encerrar combate</button>` : `<span class="spacer"></span><button class="btn primary" id="iStart" ${I.list.length ? "" : "disabled"}>⚔️ Começar combate</button>`}</div>
+    <p class="hint">Arraste as linhas para mudar a ordem. 🚫 esconde da barra dos jogadores (monstros surpresa). O bônus vem da barra “Ini” do token, se existir. No combate, os jogadores veem a barra de retratos no topo e recebem “Seu turno!”.</p></div>`;
+  const P = $("#panel"); $("#pClose").onclick = closePanel;
+  $("#iAddAll").onclick = () => { let n = 0; for (const t of tokens) if (!isProp(t) && iniAdd(t)) n++; if (!n) toast("Todos os tokens do mapa já estão no combate."); iniSave(); };
+  $("#iAddSel").onclick = () => { const t = tokens.find(x => x.id === selTok && !isProp(x)); if (!t) return toast("Selecione um token no mapa primeiro."); if (!iniAdd(t)) toast("Ele já está no combate."); iniSave(); };
+  $("#iAddNew").onclick = () => { INI().list.push({id: uid(), tk: null, n: "Criatura", f: "1d20", v: null, hid: false}); iniSave(); };
+  $("#iRollAll").onclick = () => { for (const e of INI().list) if (e.v == null || !I.on) iniRoll(e); iniSort(); iniSave(); toast("Iniciativas roladas e ordenadas."); };
+  $("#iSort").onclick = () => { iniSort(); iniSave(); };
+  $("#iClear").onclick = () => { if (confirm("Tirar todo mundo da lista de iniciativa?")) { scene.init = {on: false, round: 1, cur: 0, list: []}; iniSave(); } };
+  $("#iAsk").onclick = () => { const L = I.list.filter(e => iniOwner(e)).map(e => ({id: e.id, n: e.n, f: e.f, o: iniOwner(e)})); if (!L.length) return toast("Nenhum token de jogador na lista (dê um dono ao token)."); send("iniask", {list: L}); toast("Pedido enviado: os jogadores vão rolar."); };
+  if ($("#iStart")) $("#iStart").onclick = () => { for (const e of I.list) if (e.v == null) iniRoll(e); iniSort(); Object.assign(I, {on: true, round: 1, cur: 0}); iniSave(); send("turnfx", {start: 1}); };
+  if ($("#iNext")) $("#iNext").onclick = () => iniGo(1);
+  if ($("#iPrev")) $("#iPrev").onclick = () => iniGo(-1);
+  if ($("#iEnd")) $("#iEnd").onclick = () => { I.on = false; iniSave(); toast("Combate encerrado."); };
+  P.oninput = e => { const d = e.target.dataset; const i = +(d.in ?? d.if ?? d.iv); if (isNaN(i)) return; const en = I.list[i];
+    if (d.in != null) en.n = e.target.value; else if (d.if != null) en.f = e.target.value; else { const v = e.target.value.trim(); en.v = v === "" ? null : +v || 0; }
+    clearTimeout(P._t); P._t = setTimeout(() => { save("scene", "merge"); drawTurnBar(); }, 400); };
+  P.onkeydown = e => e.stopPropagation();
+  P.onclick = e => { const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
+    if (d.ir != null) { const en = I.list[+d.ir]; const r = iniRoll(en); if (r) toast(`${en.n}: ${r.total}`, 1400); iniSave(); }
+    else if (d.ih != null) { const en = I.list[+d.ih]; en.hid = !en.hid; iniSave(); }
+    else if (d.ix != null) { const i = +d.ix; I.list.splice(i, 1); if (I.cur >= I.list.length) I.cur = 0; else if (i < I.cur) I.cur--; iniSave(); } };
+  // arrastar as linhas para reordenar
+  let from = null;
+  P.ondragstart = e => { const r = e.target.closest("[data-ii]"); if (!r) return; from = +r.dataset.ii; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/mesa-ini", String(from)); r.classList.add("dragging"); };
+  P.ondragover = e => { const r = e.target.closest("[data-ii]"); if (from == null || !r) return; e.preventDefault(); P.querySelectorAll(".irow.over").forEach(x => x !== r && x.classList.remove("over")); r.classList.add("over"); };
+  P.ondrop = e => { const r = e.target.closest("[data-ii]"); if (from == null || !r) return; e.preventDefault(); const to = +r.dataset.ii, curId = I.list[I.cur]?.id, [m] = I.list.splice(from, 1); I.list.splice(to, 0, m); I.cur = Math.max(0, I.list.findIndex(x => x.id === curId)); from = null; iniSave(); };
+  P.ondragend = () => { from = null; P.querySelectorAll(".dragging,.over").forEach(x => x.classList.remove("dragging", "over")); };
+}
+let lastTurnKey = "";
+function drawTurnBar(){
+  const I = scene.init; let el = $("#turnBar");
+  if (!I?.on || !I.list?.length) { el?.remove(); lastTurnKey = ""; return; }
+  if (!el) { el = document.createElement("div"); el.id = "turnBar"; el.className = "turnbar"; document.body.appendChild(el); }
+  const vis = I.list.map((e, i) => ({e, i})).filter(x => isGM || !x.e.hid), cur = I.list[I.cur];
+  const curVis = isGM || !cur?.hid;
+  el.innerHTML = `<div class="tb-round">Rodada <b>${I.round}</b></div>
+    ${isGM ? `<button class="tb-nav" id="tbPrev" title="Turno anterior">◀</button>` : ""}
+    <div class="tb-list">${vis.map(({e, i}) => { const t = iniTok(e), on = i === I.cur; return `<button class="tb-p ${on ? "on" : ""} ${iniMine(e) ? "mine" : ""} ${e.hid ? "hid" : ""} ${!t && e.tk ? "gone" : ""}" data-tb="${i}" style="--pc:${esc(t?.c || "#6b5a44")}" title="${esc(e.n)}${e.v != null ? " · iniciativa " + e.v : ""}">
+        <span class="tb-img">${t?.img ? `<img src="${esc(t.img)}" alt="">` : `<span>${esc((e.n || "?").slice(0, 2).toUpperCase())}</span>`}</span>
+        ${isGM || t?.o ? (t?.b?.[0] ? `<span class="tb-hp"><i style="width:${Math.max(0, Math.min(100, (+t.b[0].v || 0) / Math.max(1, +t.b[0].m || 1) * 100))}%"></i></span>` : "") : ""}
+        <span class="tb-n">${esc(e.n)}</span>${on ? `<span class="tb-arrow">▲</span>` : ""}</button>`; }).join("")}</div>
+    ${isGM ? `<button class="tb-nav next" id="tbNext" title="Próximo turno">▶</button>` : cur && iniMine(cur) ? `<button class="btn small primary tb-end" id="tbEnd">✔ Terminar meu turno</button>` : ""}`;
+  if (isGM) { $("#tbPrev").onclick = () => iniGo(-1); $("#tbNext").onclick = () => iniGo(1); }
+  const te = $("#tbEnd"); if (te) te.onclick = () => { send("endturn", {id: cur.id, who: myNick}); te.disabled = true; te.textContent = "…"; };
+  el.querySelector(".tb-list").onclick = e => { const b = e.target.closest("[data-tb]"); if (!b) return; const t = iniTok(I.list[+b.dataset.tb]); if (t && (isGM || !t.h)) centerOn(t.x, t.y, Math.max(cam.z, .8)); if (isGM && e.detail === 2) openIniPanel(); };
+  el.querySelector(".tb-list").ondblclick = () => { if (isGM) openIniPanel(); };
+  // anúncio de troca de turno
+  const key = I.round + ":" + (cur?.id || "");
+  if (key !== lastTurnKey) {
+    const first = !lastTurnKey; lastTurnKey = key;
+    if (cur && curVis && !first) turnAnnounce(cur);
+    else if (cur && curVis && first && iniMine(cur)) turnAnnounce(cur);
+  }
+}
+function turnAnnounce(e){
+  const mine = iniMine(e), b = document.createElement("div"); b.className = "turnann" + (mine ? " mine" : "");
+  b.innerHTML = mine ? `⚔️ <b>Seu turno!</b> <span>${esc(e.n)}</span>` : `Turno de <b>${esc(e.n)}</b>`;
+  document.body.appendChild(b); setTimeout(() => b.remove(), mine ? 2600 : 1700);
+  if (DS.init()) { const t = DS.ctx.currentTime; if (mine) { DS.tone(t, 523, .18, .16, "triangle"); DS.tone(t + .12, 784, .3, .16, "triangle"); } else DS.tone(t, 440, .12, .07, "sine"); }
+  const tk = iniTok(e); if (tk && mine) centerOn(tk.x, tk.y, Math.max(cam.z, .8));
+}
+function paintTurnRing(ts){ // o token da vez ganha um anel dourado no mapa
+  const I = scene.init; if (!I?.on) return; const e = I.list?.[I.cur]; if (!e?.tk || (!isGM && e.hid)) return;
+  const t = ts.find(x => x.id === e.tk); if (!t || (!isGM && t.h)) return;
+  const r = tokR(t) + 7 / cam.z; ctx.save(); ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+  ctx.shadowColor = "#ffd76a"; ctx.shadowBlur = 14; ctx.strokeStyle = "#ffd76a"; ctx.lineWidth = 3.5 / cam.z; ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.setLineDash([6 / cam.z, 5 / cam.z]); ctx.beginPath(); ctx.arc(t.x, t.y, r + 5 / cam.z, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,215,106,.55)"; ctx.lineWidth = 1.5 / cam.z; ctx.stroke(); ctx.restore();
+}
+function iniAskPrompt(list){ // jogador: rolar a iniciativa dos seus personagens
+  const mine = list.filter(e => String(e.o || "").toLowerCase() === String(myNick || "").toLowerCase() || e.o === "*"); if (!mine.length) return;
+  let box = $("#iniAsk"); box?.remove(); box = document.createElement("div"); box.id = "iniAsk"; box.className = "iniask";
+  box.innerHTML = `<b>⚔️ Role a iniciativa!</b>${mine.map(e => `<button class="btn primary" data-ia="${esc(e.id)}" data-f="${esc(e.f)}" data-n="${esc(e.n)}">🎲 ${esc(e.n)} <small>${esc(e.f)}</small></button>`).join("")}`;
+  document.body.appendChild(box);
+  if (DS.init()) DS.tone(DS.ctx.currentTime, 660, .2, .1, "sine");
+  box.onclick = ev => { const b = ev.target.closest("[data-ia]"); if (!b) return;
+    let r; try { r = rollFormula(b.dataset.f); } catch { r = rollFormula("1d20"); }
+    const roll = {id: uid(), v: MAP_VER, who: myNick || "Jogador", label: "Iniciativa · " + b.dataset.n, ...r, secret: false, snd: null}; send("roll", roll); addRoll(roll, true);
+    send("inires", {id: b.dataset.ia, v: r.total, who: myNick}); b.remove(); if (!box.querySelector("[data-ia]")) box.remove(); };
+}
+
 // ---------- pings (Alt + clique) ----------
 let pings = [];
 const nameColor = n => { let h = 0; for (const ch of String(n)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 75% 62%)`; };
@@ -2699,7 +2818,7 @@ function drawTools(){
   $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r") + btn("spell", I.spell, "Áreas de magia", "m")
     + (!isGM ? `<hr><button class="tool" id="pMaps" title="Mapas que o mestre liberou" aria-label="Mapas">${I.maps}<i class="tdot" hidden></i></button><button class="tool" id="pNotes" title="Anotações: o que o mestre liberou e as suas notas" aria-label="Anotações">${I.notes}<i class="tdot" hidden></i></button>` : "")
     + (isGM ? btn("draw", I.draw, "Desenhar e marcar áreas", "d") + btn("erase", I.erase, "Borracha (apaga desenhos)", "e") + btn("fog", I.fog, "Névoa de guerra", "f") + btn("wall", I.wall, "Paredes e portas (bloqueiam luz e visão)", "w")
-      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="handBtn" title="Anotações, mapas e imagens (libere para os jogadores ou mostre na tela deles)" aria-label="Anotações">${I.notes}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
+      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="iniBtn" title="Iniciativa e turnos" aria-label="Iniciativa">${I.swords}</button><button class="tool" id="handBtn" title="Anotações, mapas e imagens (libere para os jogadores ou mostre na tela deles)" aria-label="Anotações">${I.notes}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
   $("#tools").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.tool) setTool(b.dataset.tool);
@@ -2708,6 +2827,7 @@ function drawTools(){
     else if (b.id === "assetsBtn") panelKind === "assets" ? closePanel() : openAssets();
     else if (b.id === "genBtn") panelKind === "gen" ? closePanel() : openGenPanel();
     else if (b.id === "mapsBtn") panelKind === "maps" ? closePanel() : openMapsPanel();
+    else if (b.id === "iniBtn") panelKind === "ini" ? closePanel() : openIniPanel();
     else if (b.id === "handBtn") panelKind === "hand" ? closePanel() : openHandPanel();
     else if (b.id === "pMaps" || b.id === "pNotes") { b.querySelector(".tdot").hidden = true; if (panelKind === "hand" && handTab === (b.id === "pMaps" ? "mapa" : "nota")) closePanel(); else openHandPanel(b.id === "pMaps" ? "mapa" : "nota"); }
     else if (b.id === "sceneBtn") panelKind === "scene" ? closePanel() : openScenePanel();
@@ -2731,6 +2851,7 @@ function drawTop(){
   const lb = $("#lookBtn"); if (lb) lb.onclick = () => { lookMouse = !lookMouse; try { localStorage.setItem("mesa.look", lookMouse ? "1" : "0"); } catch {} drawTop(); };
   const tb = $("#turnBtn"); if (tb) tb.onclick = () => { let n = 0; for (const t of tokens) if (t.tr?.length) { t.tr = []; n++; } save("tokens"); dirty = true; selBarKey = ""; toast(n ? "Novo turno: rastros apagados." : "Novo turno."); };
   const cb = $("#castBtn"); if (cb) cb.onclick = () => { const [wx, wy] = toWorld(innerWidth / 2, innerHeight / 2); send("view", {x: wx, y: wy, z: cam.z}); toast("Jogadores levados para a sua visão."); };
+  drawTurnBar();
 }
 function drawEmpty(){
   let el = $("#emptyMap");
@@ -3040,7 +3161,7 @@ function hbEditor(i){
   let el = $("#hbEdit"); if (!el) { el = document.createElement("div"); el.id = "hbEdit"; el.className = "hbedit"; document.body.appendChild(el); }
   const draw = () => {
     el.innerHTML = `<div class="hbe-top"><span class="hbs full big" style="--hc:${esc(p.c)}"><span class="hbe">${esc(p.e || "🎲")}</span><span class="hbn">${esc(p.n || "…")}</span></span>
-        <div class="hbe-f"><input id="hbN" maxlength="24" placeholder="Nome (ex.: Ataque furioso)" value="${esc(p.n)}"><input id="hbF" maxlength="40" placeholder="Fórmula (ex.: 1d20+5)" value="${esc(p.f)}"><div class="dm-err" id="hbErr"></div></div></div>
+        <div class="hbe-f"><input id="hbN" maxlength="24" autocomplete="off" placeholder="Nome (ex.: Ataque furioso)" value="${esc(p.n)}"><input id="hbF" class="hbf" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Fórmula (ex.: 1d20+5)" value="${esc(p.f)}"><div class="dm-err" id="hbErr"></div></div></div>
       <div class="lbl">Emoji</div><div class="hbe-emo">${HB_EMOJI.map(x => `<button data-he="${x}" aria-pressed="${p.e === x}">${x}</button>`).join("")}<input id="hbEc" maxlength="4" placeholder="outro" value="${HB_EMOJI.includes(p.e) ? "" : esc(p.e || "")}" title="Cole qualquer emoji"></div>
       <div class="lbl">Cor</div><div class="hbe-col">${HB_COLORS.map(c => `<button data-hc="${c}" style="background:${c}" aria-pressed="${p.c === c}" aria-label="Cor ${c}"></button>`).join("")}<input type="color" id="hbCc" value="${esc(p.c)}" title="Outra cor"></div>
       <div class="acts foot">${isNew ? "" : `<button class="btn small danger" id="hbDel">Remover</button>`}<button class="btn small" id="hbTry">🎲 Testar</button><span class="spacer"></span><button class="btn small" id="hbX">Cancelar</button><button class="btn small primary" id="hbOk">Salvar</button></div>`;
@@ -3374,6 +3495,17 @@ async function boot(){
     }
     dirty = true;
   });
+  chan.on("broadcast", {event: "endturn"}, ({payload: p}) => { // jogador terminou o turno
+    if (!isGM || !scene.init?.on) return; const I = scene.init, e = I.list[I.cur]; if (!e || e.id !== p?.id) return;
+    const o = String(iniOwner(e) || "").toLowerCase(); if (o !== "*" && o !== String(p.who || "").toLowerCase()) return;
+    iniGo(1);
+  });
+  chan.on("broadcast", {event: "inires"}, ({payload: p}) => { // jogador rolou a iniciativa
+    if (!isGM || !p?.id) return; const I = INI(), e = I.list.find(x => x.id === p.id); if (!e) return;
+    const o = String(iniOwner(e) || "").toLowerCase(); if (o !== "*" && o !== String(p.who || "").toLowerCase()) return;
+    e.v = +p.v || 0; if (!I.on) iniSort(); iniSave();
+  });
+  chan.on("broadcast", {event: "iniask"}, ({payload: p}) => { if (!isGM && Array.isArray(p?.list)) iniAskPrompt(p.list); });
   chan.on("broadcast", {event: "hand"}, async () => { // o mestre mudou as anotações
     if (isGM) return; const before = new Set(handVisible().map(h => h.id + (h.at || ""))); await handLoad();
     const fresh = handVisible().filter(h => !before.has(h.id + (h.at || "")));
