@@ -25,6 +25,8 @@ const I = {
   brush:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 4l6 6-8 8H6v-6z"/></svg>',
   back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>',
 };
+I.spell = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 14 10"/><path d="m15 3 1.5 3.5L20 8l-3.5 1.5L15 13l-1.5-3.5L10 8l3.5-1.5z"/></svg>';
+I.box = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7 12 3l9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>';
 I.wall = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M3 10h18M3 15h18M9 5v5m6 0v5m-6 0v4m6 0v4"/></svg>';
 I.list = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="4.5" cy="18" r="1.5"/></svg>';
 I.door = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 21V4l10-1v18"/><path d="M3 21h18"/><circle cx="12" cy="12" r="1"/></svg>';
@@ -119,7 +121,7 @@ function getImg(url){
 let selBarKey = "";
 function selBar(){
   const t = tokens.find(x => x.id === selTok), can = t && (isGM || owns(t));
-  const key = can ? [t.id, t.n, t.h, isGM, JSON.stringify(t.b || [])].join("|") : "";
+  const key = can ? [t.id, t.n, t.h, isGM, JSON.stringify(t.b || []), (t.tr || []).length].join("|") : "";
   if (key === selBarKey) return; selBarKey = key;
   let el = $("#selbar"); if (!el) { el = document.createElement("div"); el.id = "selbar"; el.className = "selbar"; document.body.appendChild(el); }
   if (!can) { el.hidden = true; return; }
@@ -132,6 +134,7 @@ function selBar(){
   el.innerHTML = `<div class="sbrow"><b>${esc(t.n || "Token")}</b>
     ${isGM ? `<button class="btn small" data-sb="edit">✎ Editar</button>` : ""}
     <button class="btn small" data-sb="l" title="Girar (Q)" aria-label="Girar para a esquerda">↺</button><button class="btn small" data-sb="r" title="Girar (E)" aria-label="Girar para a direita">↻</button>
+    ${isGM && !isProp(t) && t.tr?.length ? `<button class="btn small" data-sb="back" title="Volta para onde estava antes do último movimento">↶ Voltar movimento</button><button class="btn small" data-sb="trail" title="Apagar o rastro deste token">🧹 Rastro</button>` : ""}
     ${isGM ? `<button class="btn small" data-sb="hide">${t.h ? "👁 Mostrar aos jogadores" : "🚫 Ocultar"}</button><button class="btn small danger" data-sb="del">Remover</button>` : ""}</div>
     ${barUI ? `<div class="sbrow">${barUI}</div>` : ""}`;
   const setHP = (i, v) => {
@@ -149,32 +152,49 @@ function selBar(){
     const cur = tokens.find(x => x.id === selTok); if (!cur) return;
     const a = b.dataset.sb;
     if (b.dataset.hp != null) { const i = +b.dataset.hp; return setHP(i, (+cur.b[i].v || 0) + +b.dataset.d); }
-    if (a === "edit") openTokenPanel(cur);
+    if (a === "edit") return isProp(cur) ? openPropPanel(cur) : openTokenPanel(cur);
+    if (a === "back") { const mv = cur.tr?.pop(); if (!mv) return; const [x, y] = mv[0]; cur.x = x; cur.y = y; send("tok", {id: cur.id, x, y, a: cur.a}); save("tokens"); dirty = true; selBarKey = ""; return toast("Movimento desfeito."); }
+    if (a === "trail") { cur.tr = []; save("tokens"); dirty = true; selBarKey = ""; return; }
     else if (a === "l" || a === "r") rotateSel(a === "l" ? -1 : 1);
     else if (a === "hide") { cur.h = !cur.h; save("tokens"); dirty = true; toast(cur.h ? "Token oculto dos jogadores." : "Token visível para os jogadores."); }
     else if (a === "del") { if (confirm(`Remover “${cur.n || "token"}”?`)) { tokens = tokens.filter(x => x.id !== cur.id); selTok = null; save("tokens"); dirty = true; } }
   };
 }
+let myTokens = (() => { try { return JSON.parse(localStorage.getItem("mesa.mytokens")) || []; } catch { return []; } })();
+const saveMyTokens = () => { try { localStorage.setItem("mesa.mytokens", JSON.stringify(myTokens)); } catch {} };
 function openTokenList(){
   panelKind = "list";
   const row = t => `<div class="tlrow"><span class="tldot" style="background:${esc(t.c || "#d0a54c")}"></span><button class="tlname" data-go="${t.id}">${esc(t.n || "(sem nome)")}${t.h ? ' <em>oculto</em>' : ""}${t.o ? ` <small>· ${t.o === "*" ? "todos" : esc(t.o)}</small>` : ""}</button>
     <button class="btn small" data-hide="${t.id}" title="${t.h ? "Mostrar" : "Ocultar"}">${t.h ? "👁" : "🚫"}</button><button class="btn small" data-edit="${t.id}">✎</button></div>`;
   $("#panel").innerHTML = `<div class="panel" role="dialog" aria-label="Tokens"><h3>Tokens <button class="btn small" id="pClose">Fechar</button></h3>
-    ${tokens.length ? tokens.map(row).join("") : `<p class="hint">Nenhum token ainda.</p>`}
-    <div class="acts"><button class="btn primary" id="lNew">${I.plus} Novo token</button></div></div>`;
+    ${tokens.some(t => !isProp(t)) ? tokens.filter(t => !isProp(t)).map(row).join("") : `<p class="hint">Nenhum token ainda.</p>`}
+    <div class="acts"><button class="btn primary" id="lNew">${I.plus} Novo token</button><button class="btn" id="lAll" title="Cria um token para cada jogador com o mapa aberto que ainda não tem personagem">👥 Adicionar todos os jogadores</button></div>
+    <div class="acat">Meus tokens <span class="sub">(salvos neste computador)</span></div>
+    <div class="mytok">${myTokens.map((m, i) => `<button class="btn small" data-mt="${i}" title="Colocar no mapa (Shift+clique apaga)"><span class="tldot" style="background:${esc(m.c || "#d0a54c")}"></span>${esc(m.n || "Token")}</button>`).join("") || `<p class="hint">Na janela de um token, use “☆ Salvar em Meus Tokens”.</p>`}</div>
+    ${tokens.some(isProp) ? `<div class="acat">Objetos no mapa</div>${tokens.filter(isProp).map(row).join("")}` : ""}</div>`;
   $("#pClose").onclick = closePanel; $("#lNew").onclick = () => openTokenPanel(null);
+  $("#lAll").onclick = () => {
+    const have = new Set(tokens.map(t => (t.o || "").toLowerCase())), names = peersOnMap.filter(n => !have.has(n.toLowerCase()));
+    if (!names.length) return toast(peersOnMap.length ? "Todos os jogadores no mapa já têm personagem." : "Nenhum jogador está com o mapa aberto agora.");
+    const [x0, y0] = placeAt();
+    names.forEach((n, i) => { const [x, y] = snapPoint(x0 + i * G().size, y0); tokens.push({id: uid(), n, o: n, c: COLORS[(i + 2) % COLORS.length], s: 1, x, y, sn: true, sp: 9, vi: {on: true, rb: 30, rd: 12, rk: 0, ang: 360}}); });
+    save("tokens"); dirty = true; openTokenList(); toast(`${names.length} ${names.length === 1 ? "personagem criado" : "personagens criados"}.`);
+  };
   $("#panel").onclick = e => {
-    const g = e.target.closest("[data-go]"), h = e.target.closest("[data-hide]"), ed = e.target.closest("[data-edit]");
+    const g = e.target.closest("[data-go]"), h = e.target.closest("[data-hide]"), ed = e.target.closest("[data-edit]"), mt = e.target.closest("[data-mt]");
+    if (mt) { const i = +mt.dataset.mt; if (e.shiftKey) { if (confirm("Apagar dos Meus tokens?")) { myTokens.splice(i, 1); saveMyTokens(); openTokenList(); } return; } const c = JSON.parse(JSON.stringify(myTokens[i])); const [x0, y0] = placeAt(); const [x, y] = snapPoint(x0, y0, c.s || 1); tokens.push({...c, id: uid(), x, y}); selTok = tokens[tokens.length - 1].id; save("tokens"); dirty = true; return; }
     if (g) { const t = tokens.find(x => x.id === g.dataset.go); if (t) { selTok = t.id; centerOn(t.x, t.y, Math.max(cam.z, .8)); } }
     if (h) { const t = tokens.find(x => x.id === h.dataset.hide); if (t) { t.h = !t.h; save("tokens"); dirty = true; openTokenList(); } }
-    if (ed) { const t = tokens.find(x => x.id === ed.dataset.edit); if (t) openTokenPanel(t); }
+    if (ed) { const t = tokens.find(x => x.id === ed.dataset.edit); if (t) isProp(t) ? openPropPanel(t) : openTokenPanel(t); }
   };
 }
 function frame(){
+  if (pings.length) dirty = true;
   if (dirty) { dirty = false; paint(); selBar(); }
   requestAnimationFrame(frame);
 }
 function paint(){
+  refreshBlock();
   const d = devicePixelRatio || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#0d0b09"; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -214,26 +234,37 @@ function paint(){
   if (drag?.kind === "draw" && drag.shape) paintDrawing(drag.shape, true);
   // tokens
   const ts = tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t);
+  for (const t of ts) if (isProp(t) && (isGM || !t.h)) paintProp(t);
+  for (const e of allTpls()) paintTpl(e.t, selTpl === e.t.id);
+  if (drag?.kind === "tplnew") paintTpl(drag.t, true);
+  for (const t of ts) if (!isProp(t) && (isGM || !t.h) && (showTrails || selTok === t.id)) paintTrail(t);
   for (const t of ts) if (isGM || !t.h) paintLightGlow(t);
   for (const t of ts) if (isGM || !t.h) paintAura(t);
   if (isGM && !gmPreview) for (const t of ts) if (VI(t)) paintVisionGM(t);
   const vsP = !isGM ? viewers() : [];
   const seenTok = t => isGM || owns(t) || !vsP.length || vsP.some(v => sees(ts.find(x => x.id === v.id) || v, t.x, t.y, ts));
-  for (const t of ts) if ((isGM || !t.h) && seenTok(t)) paintToken(t);
+  for (const t of ts) if (!isProp(t) && (isGM || !t.h) && seenTok(t)) paintToken(t);
   // névoa, luz e visão
   if (fog.on) paintFog();
-  if (!isGM) paintLighting(viewers());
+  if (!isGM) {
+    const vsL = viewers(); paintLighting(vsL);
+    // objetos que bloqueiam (casas, árvores) aparecem por cima da escuridão quando alguém vê a borda deles
+    if (vsL.length) for (const t of ts) if (isProp(t) && t.blk && !t.h && propSeen(t, vsL, ts)) paintProp(t);
+  }
   else if (gmPreview) paintLighting(tokens.filter(t => VI(t) && t.o), .92);
   if (isGM) paintWalls();
   if (drag?.kind === "fogrect") { const {a, b} = drag; ctx.strokeStyle = opt.fog === "reveal" ? "#ffe28a" : "#e0735e"; ctx.setLineDash([8 / cam.z, 6 / cam.z]); ctx.lineWidth = 2 / cam.z; ctx.strokeRect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])); ctx.setLineDash([]); }
   const brushAt = drag?.kind === "fogbrush" ? drag.at : (!drag && tool === "fog" && isGM && opt.fogShape === "brush" ? hoverFog : null);
   if (brushAt) { const [a, b] = cellAt(...brushAt); ctx.beginPath(); for (const [ca, cb] of cellsInRange(a, b, opt.brush)) cellPath(ctx, ca, cb); ctx.strokeStyle = opt.fog === "reveal" ? "#ffe28a" : "#e0735e"; ctx.lineWidth = 2 / cam.z; ctx.stroke(); }
   if (drag?.kind === "token" && drag.grid && drag.moved) paintPath(drag);
+  paintPings();
   // réguas
   for (const k in rulers) paintRuler(rulers[k], k === myKey);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 function paintDrawing(dr, live){
+  if (dr.t === "tpl") return;
+  if (dr.t === "text") { const fs = 10 + (dr.w || 4) * 3; ctx.save(); ctx.font = `700 ${fs}px "Alegreya Sans", sans-serif`; ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.lineWidth = fs * .18; ctx.strokeStyle = "rgba(0,0,0,.75)"; ctx.lineJoin = "round"; String(dr.s || "").split("\n").forEach((ln, i) => { ctx.strokeText(ln, dr.p[0][0], dr.p[0][1] + i * fs * 1.15); ctx.fillStyle = dr.c; ctx.fillText(ln, dr.p[0][0], dr.p[0][1] + i * fs * 1.15); }); ctx.restore(); return; }
   const [a, b] = [dr.p[0], dr.p[dr.p.length - 1]];
   ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = dr.w; ctx.strokeStyle = dr.c; ctx.fillStyle = dr.c;
   ctx.beginPath();
@@ -335,6 +366,7 @@ function blocking(){ // paredes como segmentos (círculos viram polígonos)
     if (w.c) { const [cx, cy] = w.c, n = Math.max(12, Math.min(40, Math.round(w.r / 6))); for (let i = 0; i < n; i++) { const a1 = i / n * Math.PI * 2, a2 = (i + 1) / n * Math.PI * 2; out.push([cx + w.r * Math.cos(a1), cy + w.r * Math.sin(a1), cx + w.r * Math.cos(a2), cy + w.r * Math.sin(a2)]); } }
     else if (w.p) out.push(w.p);
   }
+  propSegs(out);
   segCache = {v: wallsVer, s: out}; return out;
 }
 function segHit(px, py, dx, dy, [x1, y1, x2, y2]){
@@ -546,11 +578,218 @@ function paintPath(d){
   ctx.restore();
 }
 function validPath(t, path){ // o mestre confere o caminho que o jogador mandou
+  refreshBlock();
   if (!Array.isArray(path) || path.length < 2 || path.length > 400) return false;
   if (Math.hypot(path[0][0] - t.x, path[0][1] - t.y) > G().size * .75) return false;
   if (path.length - 1 > maxCells(t)) return false;
   for (let i = 1; i < path.length; i++) { const [a, b] = path[i - 1], [c, e] = path[i]; if (Math.hypot(c - a, e - b) > G().size * 1.5) return false; if (blockedMove(a, b, c, e)) return false; }
   return true;
+}
+
+// ---------- assets (objetos do cenário) ----------
+let ASSETS = []; fetch("/assets/index.json").then(r => r.json()).then(a => { ASSETS = a; if (panelKind === "assets") openAssets(); }).catch(() => {});
+const isProp = t => t && t.k === "prop";
+const propSize = t => [(t.pw || 1) * G().size, (t.ph || 1) * G().size];
+function paintProp(t){
+  const [W, H] = propSize(t), im = getImg(t.img);
+  ctx.save(); if (t.h) ctx.globalAlpha = .45;
+  ctx.translate(t.x, t.y); ctx.rotate((t.a || 0) * Math.PI / 180);
+  if (im) ctx.drawImage(im, -W / 2, -H / 2, W, H); else { ctx.fillStyle = t.c || "#8a5a2e"; ctx.fillRect(-W / 2, -H / 2, W, H); }
+  if (selTok === t.id) {
+    ctx.globalAlpha = 1; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / cam.z; ctx.setLineDash([6 / cam.z, 4 / cam.z]); ctx.strokeRect(-W / 2, -H / 2, W, H); ctx.setLineDash([]);
+    const hy = -H / 2 - 18 / cam.z; ctx.beginPath(); ctx.moveTo(0, -H / 2); ctx.lineTo(0, hy); ctx.stroke(); ctx.beginPath(); ctx.arc(0, hy, 7 / cam.z, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill(); ctx.strokeStyle = "#000"; ctx.lineWidth = 1 / cam.z; ctx.stroke();
+  }
+  if (t.h && isGM) { ctx.globalAlpha = 1; ctx.fillStyle = "#e0735e"; ctx.font = `700 ${Math.max(10 / cam.z, 12)}px sans-serif`; ctx.textAlign = "center"; ctx.fillText("oculto", 0, 0); }
+  ctx.restore();
+}
+function propLocal(t, x, y){ const a = -(t.a || 0) * Math.PI / 180, dx = x - t.x, dy = y - t.y; return [dx * Math.cos(a) - dy * Math.sin(a), dx * Math.sin(a) + dy * Math.cos(a)]; }
+function hitProp(x, y){ for (let i = tokens.length - 1; i >= 0; i--) { const t = tokens[i]; if (!isProp(t)) continue; const [W, H] = propSize(t), [lx, ly] = propLocal(t, x, y); if (Math.abs(lx) <= W / 2 && Math.abs(ly) <= H / 2) return t; } return null; }
+function propHandle(t){ const [, H] = propSize(t), [vx, vy] = dirVec(t.a || 0), d = H / 2 + 18 / cam.z; return [t.x + vx * d, t.y + vy * d]; }
+function snapProp(t, x, y){
+  const g = G(); if (t.sn === false) return [Math.round(x), Math.round(y)];
+  if (g.type === "hex") return (t.pw || 1) === 1 && (t.ph || 1) === 1 ? snapPoint(x, y) : [Math.round(x), Math.round(y)];
+  const rot = Math.round((t.a || 0) / 90) % 2 !== 0, w = rot ? (t.ph || 1) : (t.pw || 1), h = rot ? (t.pw || 1) : (t.ph || 1);
+  const sx = w % 2 ? g.ox + (Math.floor((x - g.ox) / g.size) + .5) * g.size : g.ox + Math.round((x - g.ox) / g.size) * g.size;
+  const sy = h % 2 ? g.oy + (Math.floor((y - g.oy) / g.size) + .5) * g.size : g.oy + Math.round((y - g.oy) / g.size) * g.size;
+  return [sx, sy];
+}
+let propSigCur = "";
+function refreshBlock(){ // objetos que bloqueiam visão contam como parede
+  const sig = tokens.filter(t => isProp(t) && t.blk).map(t => `${t.id}${Math.round(t.x)},${Math.round(t.y)},${t.a || 0},${t.pw},${t.ph},${t.blk}`).join("|");
+  if (sig !== propSigCur) { propSigCur = sig; wallsVer++; }
+}
+function propSegs(out){
+  for (const t of tokens) {
+    if (!isProp(t) || !t.blk) continue;
+    const [W, H] = propSize(t), a = (t.a || 0) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+    if (t.blk === "circle") { const r = Math.min(W, H) / 2 * .8, n = 16; for (let i = 0; i < n; i++) { const a1 = i / n * Math.PI * 2, a2 = (i + 1) / n * Math.PI * 2; out.push([t.x + r * Math.cos(a1), t.y + r * Math.sin(a1), t.x + r * Math.cos(a2), t.y + r * Math.sin(a2)]); } continue; }
+    const k = .9, P = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => [t.x + u * W / 2 * k * c - v * H / 2 * k * sn, t.y + u * W / 2 * k * sn + v * H / 2 * k * c]);
+    for (let i = 0; i < 4; i++) out.push([...P[i], ...P[(i + 1) % 4]]);
+  }
+}
+function propSeen(t, vs, ts){
+  const [W, H] = propSize(t), a = (t.a || 0) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), pts = [];
+  for (const [u, v] of [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]]) { const k = t.blk === "circle" ? .78 : .97; pts.push([t.x + u * W / 2 * k * c - v * H / 2 * k * sn, t.y + u * W / 2 * k * sn + v * H / 2 * k * c]); }
+  const live = vs.map(v => ts.find(x => x.id === v.id) || v);
+  return pts.some(([x, y]) => live.some(v => sees(v, x, y, ts)));
+}
+let lastClick = null;
+function placeAt(){ // onde colocar coisas novas: último clique no mapa (se estiver na tela) ou centro
+  const vw = visibleWorld();
+  if (lastClick && lastClick[0] > vw.x0 && lastClick[0] < vw.x1 && lastClick[1] > vw.y0 && lastClick[1] < vw.y1) return lastClick;
+  return toWorld(innerWidth / 2, innerHeight / 2);
+}
+function addProp(a, src){
+  const [x0, y0] = placeAt(), t = {id: uid(), k: "prop", n: a.n, img: src || `/assets/${a.id}.svg`, pw: a.w, ph: a.h, a: 0, blk: a.blk || null, sn: true};
+  const [x, y] = snapProp(t, x0, y0); t.x = x; t.y = y;
+  tokens.push(t); selTok = t.id; save("tokens"); dirty = true; drawEmpty();
+}
+let myAssets = (() => { try { return JSON.parse(localStorage.getItem("mesa.myassets")) || []; } catch { return []; } })();
+const saveMyAssets = () => { try { localStorage.setItem("mesa.myassets", JSON.stringify(myAssets)); } catch {} };
+function openAssets(){
+  panelKind = "assets";
+  const cats = [...new Set(ASSETS.map(a => a.cat))];
+  const card = (a, i, mine) => `<button class="asset" data-${mine ? "my" : "as"}="${i}" title="${esc(a.n)} · ${a.w}×${a.h} casas${a.blk ? " · bloqueia visão" : ""}"><span class="athumb"><img src="${esc(mine ? a.src : `/assets/${a.id}.svg`)}" alt="" loading="lazy"></span><span class="aname">${esc(a.n)}</span><small>${a.w}×${a.h}</small></button>`;
+  $("#panel").innerHTML = `<div class="panel assets-panel" role="dialog" aria-label="Assets"><h3>Assets <button class="btn small" id="pClose">Fechar</button></h3>
+    <p class="hint">Clique para colocar no mapa (no último lugar em que você clicou). Depois arraste, gire pela bolinha branca e edite com dois cliques. Só você mexe neles.</p>
+    ${ASSETS.length ? cats.map(c => `<div class="acat">${esc(c)}</div><div class="agrid">${ASSETS.map((a, i) => a.cat === c ? card(a, i) : "").join("")}</div>`).join("") : `<p class="hint">Carregando…</p>`}
+    <div class="acat">Meus assets</div><div class="agrid">${myAssets.map((a, i) => card(a, i, true)).join("") || `<p class="hint">Nenhum ainda.</p>`}</div>
+    <div class="sub-add"><input type="text" id="maName" placeholder="Nome" maxlength="24"><input type="url" id="maUrl" placeholder="link da imagem (PNG sem fundo fica melhor)"><div class="two"><label>Larg. <input type="number" id="maW" min="1" max="12" value="1"></label><label>Alt. <input type="number" id="maH" min="1" max="12" value="1"></label></div>
+      <div class="acts" style="margin-top:6px"><label class="btn small" style="margin:0;color:var(--ink)">Arquivo…<input type="file" id="maFile" accept="image/*" hidden></label><button class="btn small primary" id="maAdd">＋ Adicionar aos meus assets</button></div></div></div>`;
+  $("#pClose").onclick = closePanel;
+  $("#maFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; toast("Enviando…"); try { $("#maUrl").value = await uploadImage(f, "assets"); if (!$("#maName").value) $("#maName").value = f.name.replace(/\.\w+$/, "").slice(0, 24); toast("Imagem pronta."); } catch (err) { toast("Não enviei: " + err.message); } };
+  $("#maAdd").onclick = () => { const src = $("#maUrl").value.trim(); if (!/^https?:\/\//.test(src)) return toast("Coloque o link ou envie um arquivo."); myAssets.push({n: $("#maName").value.trim() || "Asset", src, w: Math.max(1, Math.min(12, +$("#maW").value || 1)), h: Math.max(1, Math.min(12, +$("#maH").value || 1))}); saveMyAssets(); openAssets(); };
+  $("#panel").onclick = e => {
+    const b = e.target.closest("[data-as],[data-my]"); if (!b) return;
+    if (b.dataset.as != null) addProp(ASSETS[+b.dataset.as]);
+    else { const a = myAssets[+b.dataset.my]; if (e.shiftKey) { if (confirm(`Tirar “${a.n}” dos meus assets?`)) { myAssets.splice(+b.dataset.my, 1); saveMyAssets(); openAssets(); } return; } addProp({n: a.n, w: a.w, h: a.h, blk: null}, a.src); }
+  };
+}
+function openPropPanel(t){
+  panelKind = "prop";
+  const d = JSON.parse(JSON.stringify(t));
+  $("#panel").innerHTML = `<div class="panel" role="dialog" aria-label="Objeto"><h3>Objeto <button class="btn small" id="pClose">Fechar</button></h3>
+    <label for="oN">Nome</label><input type="text" id="oN" maxlength="24" value="${esc(d.n || "")}">
+    <div class="two"><div><label for="oW">Largura (casas)</label><input type="number" id="oW" min="1" max="20" value="${d.pw || 1}"></div><div><label for="oH">Altura (casas)</label><input type="number" id="oH" min="1" max="20" value="${d.ph || 1}"></div></div>
+    <label for="oA">Ângulo: <b id="oAv">${d.a || 0}°</b></label><input type="range" id="oA" min="0" max="359" step="1" value="${d.a || 0}">
+    <label for="oB">Bloqueia a visão e a luz</label><select id="oB"><option value="">Não</option><option value="rect" ${d.blk === "rect" ? "selected" : ""}>Sim, no formato retangular</option><option value="circle" ${d.blk === "circle" ? "selected" : ""}>Sim, redondo (árvores, colunas)</option></select>
+    <label for="oI">Imagem (link)</label><input type="url" id="oI" value="${esc(d.img || "")}">
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="oS" ${d.sn !== false ? "checked" : ""}> Agarrar ao grid</label>
+    <label class="chk"><input type="checkbox" id="oHid" ${d.h ? "checked" : ""}> Oculto dos jogadores</label>
+    <div class="acts foot"><button class="btn small" id="oDup">Duplicar</button><button class="btn small danger" id="oDel">Remover</button><span class="spacer"></span><button class="btn" id="oCancel">Cancelar</button><button class="btn primary" id="oSave">Ok</button></div></div>`;
+  $("#pClose").onclick = $("#oCancel").onclick = closePanel;
+  $("#oA").oninput = e => $("#oAv").textContent = e.target.value + "°";
+  const cur = () => tokens.find(x => x.id === t.id);
+  $("#oSave").onclick = () => { const c = cur(); if (!c) return closePanel(); Object.assign(c, {n: $("#oN").value.trim(), pw: Math.max(1, Math.min(20, +$("#oW").value || 1)), ph: Math.max(1, Math.min(20, +$("#oH").value || 1)), a: +$("#oA").value, blk: $("#oB").value || null, img: $("#oI").value.trim() || c.img, sn: $("#oS").checked, h: $("#oHid").checked}); const [x, y] = snapProp(c, c.x, c.y); c.x = x; c.y = y; save("tokens"); dirty = true; closePanel(); };
+  $("#oDel").onclick = () => { tokens = tokens.filter(x => x.id !== t.id); selTok = null; save("tokens"); dirty = true; closePanel(); };
+  $("#oDup").onclick = () => { const c0 = cur(); if (!c0) return; const c = JSON.parse(JSON.stringify(c0)); c.id = uid(); c.x += G().size * (c.pw || 1); tokens.push(c); selTok = c.id; save("tokens"); dirty = true; closePanel(); };
+}
+
+// ---------- pings (Alt + clique) ----------
+let pings = [];
+const nameColor = n => { let h = 0; for (const ch of String(n)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 75% 62%)`; };
+function addPing(p){
+  pings.push({x: +p.x, y: +p.y, who: String(p.who || "").slice(0, 30), c: String(p.c || "#ffe28a").slice(0, 30), t0: performance.now()});
+  if (DS.init()) { const t = DS.ctx.currentTime; DS.tone(t, 1320, .18, .16, "sine"); DS.tone(t + .09, 1760, .28, .13, "sine"); }
+  dirty = true;
+}
+function paintPings(){
+  const now = performance.now(); pings = pings.filter(p => now - p.t0 < 2800);
+  for (const p of pings) {
+    const age = now - p.t0, R = 46 / cam.z;
+    ctx.save();
+    for (let k = 0; k < 3; k++) { const f = ((age / 900) + k / 3) % 1; ctx.beginPath(); ctx.arc(p.x, p.y, 6 / cam.z + f * R, 0, Math.PI * 2); ctx.strokeStyle = p.c; ctx.globalAlpha = (1 - f) * Math.max(0, 1 - age / 2800) * .95; ctx.lineWidth = 3 / cam.z; ctx.stroke(); }
+    ctx.globalAlpha = Math.max(0, 1 - age / 2800); ctx.beginPath(); ctx.arc(p.x, p.y, 6 / cam.z, 0, Math.PI * 2); ctx.fillStyle = p.c; ctx.fill();
+    if (p.who) label(p.x, p.y, p.who);
+    ctx.restore();
+  }
+}
+function doPing(wx, wy, center){
+  const p = {x: Math.round(wx), y: Math.round(wy), who: isGM ? "Mestre" : (myNick || "Jogador"), c: isGM ? "#ffe28a" : nameColor(myNick), center: !!center};
+  send("ping", p); addPing(p);
+  if (center) toast("Todos foram levados até o ponto.");
+}
+
+// ---------- rastro dos movimentos ----------
+let showTrails = false;
+function pushTrail(t, pts){
+  if (!pts || pts.length < 2) return;
+  t.tr = (t.tr || []).concat([pts.map(([x, y]) => [Math.round(x), Math.round(y)])]).slice(-8);
+}
+function paintTrail(t){
+  const tr = t.tr; if (!tr?.length) return;
+  ctx.save(); ctx.lineCap = ctx.lineJoin = "round";
+  tr.forEach((mv, k) => {
+    const al = .25 + .6 * (k + 1) / tr.length;
+    ctx.globalAlpha = al; ctx.beginPath(); mv.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 5 / cam.z; ctx.stroke(); ctx.strokeStyle = t.c || "#d0a54c"; ctx.lineWidth = 2.5 / cam.z; ctx.setLineDash([2 / cam.z, 6 / cam.z]); ctx.stroke(); ctx.setLineDash([]);
+    mv.forEach(([x, y], i) => { if (!i) return; ctx.beginPath(); ctx.arc(x, y, 3 / cam.z, 0, Math.PI * 2); ctx.fillStyle = t.c || "#d0a54c"; ctx.fill(); });
+    const [x0, y0] = mv[0]; ctx.beginPath(); ctx.arc(x0, y0, 5 / cam.z, 0, Math.PI * 2); ctx.strokeStyle = t.c || "#d0a54c"; ctx.lineWidth = 2 / cam.z; ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ---------- áreas de magia ----------
+const SPELLS = [
+  {n: "Bola de fogo", ic: "🔥", sh: "circle", r: 6, c: "#ff6a1f"},
+  {n: "Cone de frio", ic: "❄️", sh: "cone", r: 18, c: "#7fd4ff"},
+  {n: "Mãos flamejantes", ic: "🔥", sh: "cone", r: 4.5, c: "#ff8a2a"},
+  {n: "Relâmpago", ic: "⚡", sh: "line", r: 30, wd: 1.5, c: "#ffe45c"},
+  {n: "Nuvem fétida", ic: "☁️", sh: "circle", r: 6, c: "#9adf7a"},
+  {n: "Escuridão", ic: "🌑", sh: "circle", r: 4.5, c: "#6a4aa8"},
+  {n: "Teia", ic: "🕸️", sh: "square", r: 6, c: "#e8e2d0"},
+  {n: "Muralha de fogo", ic: "🧱", sh: "line", r: 18, wd: 0.3, c: "#ff5a2a"},
+  {n: "Luz / Aura", ic: "✨", sh: "circle", r: 9, c: "#fff2a8"},
+  {n: "Terremoto", ic: "🌋", sh: "circle", r: 15, c: "#b0563d"},
+  {n: "Onda trovejante", ic: "💥", sh: "square", r: 4.5, c: "#8fb0ff"},
+  {n: "Veneno", ic: "☠️", sh: "circle", r: 3, c: "#5fbf4a"},
+];
+let spellSel = 0, spellCustom = null, ptpls = {};  // ptpls: magias temporárias dos jogadores (só ao vivo)
+const curSpell = () => spellCustom || SPELLS[spellSel];
+function tplShape(c, tp){
+  const L = unitPx(tp.r), [vx, vy] = dirVec(tp.a || 0), px = -vy, py = vx;
+  if (tp.sh === "circle") { c.moveTo(tp.x + L, tp.y); c.arc(tp.x, tp.y, L, 0, Math.PI * 2); }
+  else if (tp.sh === "square") { const h = L / 2; const P = [[-h, -h], [h, -h], [h, h], [-h, h]].map(([u, v]) => [tp.x + u * px + v * -vx, tp.y + u * py + v * -vy]); P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); }
+  else if (tp.sh === "cone") { const h = L / 2; c.moveTo(tp.x, tp.y); c.lineTo(tp.x + vx * L + px * h, tp.y + vy * L + py * h); c.lineTo(tp.x + vx * L - px * h, tp.y + vy * L - py * h); c.closePath(); }
+  else { const h = unitPx(tp.wd || 1.5) / 2; const P = [[tp.x + px * h, tp.y + py * h], [tp.x + vx * L + px * h, tp.y + vy * L + py * h], [tp.x + vx * L - px * h, tp.y + vy * L - py * h], [tp.x - px * h, tp.y - py * h]]; P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); }
+}
+const hitCtx = document.createElement("canvas").getContext("2d");
+function tplPath(tp){ const P = new Path2D(); tplShape(P, tp); return P; }
+function inTpl(tp, x, y, P){ return hitCtx.isPointInPath(P || tplPath(tp), x, y); }
+function tplCenter(tp){ if (tp.sh === "circle" || tp.sh === "square") return [tp.x, tp.y]; const [vx, vy] = dirVec(tp.a || 0), L = unitPx(tp.r); return [tp.x + vx * L * (tp.sh === "cone" ? .62 : .5), tp.y + vy * L * (tp.sh === "cone" ? .62 : .5)]; }
+function tplHandle(tp){ const [vx, vy] = dirVec(tp.a || 0), L = unitPx(tp.r); return tp.sh === "circle" ? [tp.x + L, tp.y] : tp.sh === "square" ? [tp.x + vx * L * .5, tp.y + vy * L * .5] : [tp.x + vx * L, tp.y + vy * L]; }
+function paintTpl(tp, sel){
+  const L = unitPx(tp.r), n = Math.ceil(L / G().size) + 2, [ca, cb] = cellAt(...tplCenter(tp));
+  ctx.save();
+  const TP = tplPath(tp);
+  ctx.beginPath(); for (const [a, b] of cellsInRange(ca, cb, n)) { const [x, y] = cellCenter(a, b); if (inTpl(tp, x, y, TP)) cellPath(ctx, a, b); }
+  ctx.fillStyle = tp.c; ctx.globalAlpha = .16; ctx.fill(); ctx.globalAlpha = .45; ctx.strokeStyle = tp.c; ctx.lineWidth = 1 / cam.z; ctx.stroke();
+  ctx.beginPath(); tplShape(ctx, tp);
+  const [cx, cy] = tplCenter(tp), gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, L);
+  gr.addColorStop(0, tp.c + "88"); gr.addColorStop(1, tp.c + "22");
+  ctx.globalAlpha = 1; ctx.fillStyle = gr; ctx.fill(); ctx.strokeStyle = tp.c; ctx.lineWidth = (sel ? 3.5 : 2.5) / cam.z; ctx.setLineDash(sel ? [8 / cam.z, 5 / cam.z] : []); ctx.stroke(); ctx.setLineDash([]);
+  const fs = Math.max(13 / cam.z, Math.min(L * .35, 34)); ctx.font = `${fs}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(tp.ic || "✨", cx, cy - fs * .15);
+  if (G().size * cam.z > 18) { ctx.font = `700 ${Math.max(11 / cam.z, fs * .38)}px "Alegreya Sans", sans-serif`; ctx.fillStyle = "#fff"; ctx.shadowColor = "#000"; ctx.shadowBlur = 4; ctx.fillText(`${tp.n} · ${String(tp.r).replace(".", ",")} ${G().unitName}`, cx, cy + fs * .7); ctx.shadowColor = "transparent"; }
+  if (sel) { const [hx, hy] = tplHandle(tp); ctx.beginPath(); ctx.arc(hx, hy, 7 / cam.z, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill(); ctx.strokeStyle = "#000"; ctx.lineWidth = 1 / cam.z; ctx.stroke(); }
+  ctx.restore();
+}
+let selTpl = null;   // {id, mine: bool (temporária do jogador) }
+const allTpls = () => [...drawings.filter(d => d.t === "tpl").map(t => ({t, gm: true})), ...Object.values(ptpls).map(t => ({t, gm: false}))];
+function canEditTpl(e){ return e.gm ? isGM : (e.t.own === myKey || isGM); }
+function hitTpl(x, y){ const L = allTpls(); for (let i = L.length - 1; i >= 0; i--) if (canEditTpl(L[i]) && inTpl(L[i].t, x, y)) return L[i]; return null; }
+function tplCommit(e){ if (e.gm) save("drawings"); else { ptpls[e.t.id] = e.t; send("tpl", {op: "set", t: e.t}); } dirty = true; drawTplBar(); }
+function tplRemove(e){ if (e.gm) { drawings = drawings.filter(d => d.id !== e.t.id); save("drawings"); } else { delete ptpls[e.t.id]; send("tpl", {op: "del", id: e.t.id}); } selTpl = null; dirty = true; drawTplBar(); }
+function curTpl(){ if (!selTpl) return null; const e = allTpls().find(x => x.t.id === selTpl); return e || null; }
+function drawTplBar(){
+  let el = $("#tplbar"); if (!el) { el = document.createElement("div"); el.id = "tplbar"; el.className = "selbar"; document.body.appendChild(el); }
+  const e = curTpl(); if (!e) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<div class="sbrow"><b>${esc(e.t.ic || "")} ${esc(e.t.n)}</b><button class="btn small" data-tp="-">−</button><span>${String(e.t.r).replace(".", ",")} ${esc(G().unitName)}</span><button class="btn small" data-tp="+">+</button>
+    ${e.gm || !isGM ? "" : `<button class="btn small" data-tp="keep" title="Guardar no mapa">Fixar</button>`}<button class="btn small danger" data-tp="del">Remover</button></div>`;
+  el.onclick = ev => { const b = ev.target.closest("[data-tp]"); if (!b) return; const k = b.dataset.tp, cur = curTpl(); if (!cur) return;
+    if (k === "del") return tplRemove(cur);
+    if (k === "keep") { const t = {...cur.t}; delete t.own; delete ptpls[t.id]; send("tpl", {op: "del", id: t.id}); drawings.push(t); save("drawings"); dirty = true; return drawTplBar(); }
+    const st = cur.t.r >= 9 ? 3 : 1.5; cur.t.r = Math.max(1.5, Math.round((cur.t.r + (k === "+" ? st : -st)) * 10) / 10); tplCommit(cur); };
 }
 function segsCross([ax, ay], [bx, by], [cx, cy, dx, dy]){
   const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax), d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
@@ -581,7 +820,7 @@ function updateExplored(){ // o mestre soma ao "já visto" o que o grupo enxerga
   if (!isGM) return; clearTimeout(exT);
   exT = setTimeout(async () => {
     const vs = tokens.filter(t => VI(t) && t.o); if (!vs.length) return;
-    const box = exBoxNow(); await ensureExC(box);
+    refreshBlock(); const box = exBoxNow(); await ensureExC(box);
     RT = box; let U; try { [U] = visibleMask(vs, tokens); } finally { RT = null; }
     const x = exC.getContext("2d"); x.globalCompositeOperation = "source-over"; x.drawImage(U, 0, 0);
     const url = exC.toDataURL("image/png");
@@ -637,13 +876,15 @@ const pts = new Map();
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * .0015), e.clientX, e.clientY); }, {passive: false});
 function hitToken(x, y){
-  for (let i = tokens.length - 1; i >= 0; i--) { const t = tokens[i]; if (!isGM && t.h) continue; if (Math.hypot(t.x - x, t.y - y) <= tokR(t)) return t; }
+  for (let i = tokens.length - 1; i >= 0; i--) { const t = tokens[i]; if (isProp(t) || (!isGM && t.h)) continue; if (Math.hypot(t.x - x, t.y - y) <= tokR(t)) return t; }
   return null;
 }
 cv.addEventListener("pointerdown", e => {
   cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); closeFlyoutSoft();
   if (pts.size === 2) { const [p1, p2] = [...pts.values()]; drag = {kind: "pinch", d: Math.hypot(p1[0] - p2[0], p1[1] - p2[1]), z: cam.z}; return; }
   const [wx, wy] = toWorld(e.clientX, e.clientY);
+  if (e.button === 0 && e.altKey) { doPing(wx, wy, isGM && e.shiftKey); if (isGM && e.shiftKey) send("view", {x: wx, y: wy, z: cam.z}); return; }
+  if (e.button === 0) lastClick = [wx, wy];
   if (e.button === 2 && tool === "wall" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (e.button === 1 || e.button === 2 || spaceDown) { drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return; }
   if (tool === "move") {
@@ -651,15 +892,24 @@ cv.addEventListener("pointerdown", e => {
     if (!t && isGM) { const wi = wallAt(wx, wy); const w = walls()[wi]; if (w?.d) { w.o = w.o ? 0 : 1; wallsChanged(); toast(w.o ? "Porta aberta." : "Porta fechada."); return; } }
     const sel = tokens.find(x => x.id === selTok);
     if (sel && (isGM || owns(sel))) { // pegou na setinha do token selecionado?
-      const r = tokR(sel), [vx, vy] = dirVec(sel.a || 0), hx = sel.x + vx * r * 1.2, hy = sel.y + vy * r * 1.2;
-      if (Math.hypot(wx - hx, wy - hy) <= Math.max(r * .38, 12 / cam.z)) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; }
+      if (isProp(sel)) { const [hx, hy] = propHandle(sel); if (Math.hypot(wx - hx, wy - hy) <= 12 / cam.z) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; } }
+      else { const r = tokR(sel), [vx, vy] = dirVec(sel.a || 0), hx = sel.x + vx * r * 1.2, hy = sel.y + vy * r * 1.2;
+        if (Math.hypot(wx - hx, wy - hy) <= Math.max(r * .38, 12 / cam.z)) { drag = {kind: "rotate", t: sel}; cv.classList.add("panning"); return; } }
     }
+    const ct = curTpl();
+    if (ct && canEditTpl(ct)) { const [hx, hy] = tplHandle(ct.t); if (Math.hypot(wx - hx, wy - hy) <= 12 / cam.z) { drag = {kind: "tplrot", e: ct}; return; } }
     if (t && (isGM || owns(t))) { selTok = t.id; drag = {kind: "token", t, dx: t.x - wx, dy: t.y - wy, moved: false, ox: t.x, oy: t.y, path: [cellAt(t.x, t.y)], grid: t.sn !== false || !isGM}; dirty = true; return; }
-    selTok = null; dirty = true;
+    const te = !t && hitTpl(wx, wy);
+    if (te) { selTpl = te.t.id; selTok = null; drag = {kind: "tplmove", e: te, dx: te.t.x - wx, dy: te.t.y - wy, moved: false}; dirty = true; drawTplBar(); return; }
+    const pr = !t && isGM && hitProp(wx, wy);
+    if (pr) { selTok = pr.id; selTpl = null; drawTplBar(); drag = {kind: "prop", t: pr, dx: pr.x - wx, dy: pr.y - wy, moved: false}; dirty = true; return; }
+    selTok = null; if (selTpl) { selTpl = null; drawTplBar(); } dirty = true;
     drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return;
   }
+  if (tool === "spell") { const sp = curSpell(); drag = {kind: "tplnew", t: {id: uid(), t: "tpl", n: sp.n, ic: sp.ic, sh: sp.sh, r: sp.r, wd: sp.wd, c: sp.c, x: Math.round(wx), y: Math.round(wy), a: 0, own: isGM ? undefined : myKey}}; dirty = true; return; }
   if (tool === "ruler") { const a = snapPoint(wx, wy); rulers[myKey] = {a, b: a}; drag = {kind: "ruler"}; dirty = true; sendRuler(); return; }
   if (!isGM) return;
+  if (tool === "draw" && opt.draw === "text") { const txt = prompt("Texto para escrever no mapa:"); if (txt && txt.trim()) { drawings.push({id: uid(), t: "text", c: opt.color, w: opt.width, p: [[Math.round(wx), Math.round(wy)]], s: txt.trim().slice(0, 200)}); save("drawings"); dirty = true; } return; }
   if (tool === "draw") { const p = [Math.round(wx), Math.round(wy)]; drag = {kind: "draw", shape: {id: uid(), t: opt.draw, c: opt.color, w: opt.width, p: opt.draw === "pen" ? [p] : [p, p]}}; return; }
   if (tool === "erase") { eraseAt(wx, wy); drag = {kind: "erase"}; return; }
   if (tool === "wall") {
@@ -693,9 +943,13 @@ cv.addEventListener("pointermove", e => {
   }
   if (drag.kind === "pinch" && pts.size === 2) { const [p1, p2] = [...pts.values()]; const d = Math.hypot(p1[0] - p2[0], p1[1] - p2[1]); zoomAt((drag.z * d / drag.d) / cam.z, (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2); return; }
   if (drag.kind === "pan") { cam.x = drag.cx + e.clientX - drag.sx; cam.y = drag.cy + e.clientY - drag.sy; dirty = true; return; }
+  if (drag.kind === "prop") { drag.t.x = wx + drag.dx; drag.t.y = wy + drag.dy; drag.moved = true; dirty = true; return; }
+  if (drag.kind === "tplnew") { const t = drag.t; if (t.sh === "circle") { t.x = Math.round(wx); t.y = Math.round(wy); } else if (Math.hypot(wx - t.x, wy - t.y) > 4 / cam.z) t.a = Math.round(Math.atan2(wx - t.x, -(wy - t.y)) * 180 / Math.PI); dirty = true; return; }
+  if (drag.kind === "tplmove") { drag.e.t.x = Math.round(wx + drag.dx); drag.e.t.y = Math.round(wy + drag.dy); drag.moved = true; dirty = true; return; }
+  if (drag.kind === "tplrot") { const t = drag.e.t; if (t.sh === "circle") { t.r = Math.max(1.5, Math.round(Math.hypot(wx - t.x, wy - t.y) / G().size * (G().unit || 1) / 1.5) * 1.5); } else t.a = Math.round(Math.atan2(wx - t.x, -(wy - t.y)) * 180 / Math.PI / 5) * 5; drag.moved = true; dirty = true; return; }
   if (drag.kind === "rotate") {
     let a = Math.atan2(wx - drag.t.x, -(wy - drag.t.y)) * 180 / Math.PI;
-    const step = e.shiftKey ? (G().type === "hex" ? 60 : 45) : 5; a = ((Math.round(a / step) * step) % 360 + 360) % 360;
+    const step = isProp(drag.t) ? (e.shiftKey ? 90 : 15) : e.shiftKey ? (G().type === "hex" ? 60 : 45) : 5; a = ((Math.round(a / step) * step) % 360 + 360) % 360;
     if (a !== drag.t.a) { drag.t.a = a; drag.moved = true; dirty = true; sendTok(drag.t); }
     return;
   }
@@ -722,7 +976,11 @@ function endPointer(e){
   if (!drag) return;
   const d = drag; drag = null;
   if (d.kind === "pinch") return;
+  if (d.kind === "prop") { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); } dirty = true; return; }
+  if (d.kind === "tplnew") { const t = d.t; if (isGM) { drawings.push(t); save("drawings"); } else { ptpls[t.id] = t; send("tpl", {op: "set", t}); } selTpl = t.id; drawTplBar(); dirty = true; return; }
+  if (d.kind === "tplmove" || d.kind === "tplrot") { if (d.moved) tplCommit(d.e); return; }
   if (d.kind === "rotate") {
+    if (isProp(d.t)) { if (d.moved) { const [x, y] = snapProp(d.t, d.t.x, d.t.y); d.t.x = x; d.t.y = y; save("tokens"); } return; }
     if (d.moved) { const t = d.t; delete tokLive[t.id]; if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else send("tokreq", {id: t.id, a: t.a, who: myNick}); }
     return;
   }
@@ -730,7 +988,7 @@ function endPointer(e){
     if (d.moved) {
       const [x, y] = d.grid ? [d.t.x, d.t.y] : d.t.sn === false ? [Math.round(d.t.x), Math.round(d.t.y)] : snapPoint(d.t.x, d.t.y, d.t.s || 1);
       d.t.x = x; d.t.y = y; delete tokLive[d.t.id];
-      if (isGM) { send("tok", {id: d.t.id, x, y}); save("tokens"); }
+      if (isGM) { if (x !== d.ox || y !== d.oy) pushTrail(d.t, d.grid ? [[d.ox, d.oy], ...d.path.slice(1).map(c => cellCenter(...c))] : [[d.ox, d.oy], [x, y]]); send("tok", {id: d.t.id, x, y}); save("tokens"); }
       else if (x !== d.ox || y !== d.oy) send("tokreq", {id: d.t.id, x, y, who: myNick, path: [[d.ox, d.oy], ...d.path.slice(1).map(c => cellCenter(...c).map(v => Math.round(v * 10) / 10))]});
     }
     dirty = true; return;
@@ -745,11 +1003,12 @@ function endPointer(e){
   if (d.kind === "fogbrush") { save("fog"); dirty = true; }
 }
 cv.addEventListener("pointerup", endPointer); cv.addEventListener("pointercancel", endPointer);
-cv.addEventListener("dblclick", e => { if (!isGM) return; const [wx, wy] = toWorld(e.clientX, e.clientY); const t = hitToken(wx, wy); if (t) openTokenPanel(t); });
-cv.addEventListener("contextmenu", e => { if (!isGM) return; const [wx, wy] = toWorld(e.clientX, e.clientY); const t = hitToken(wx, wy); if (t) { e.preventDefault(); drag = null; cv.classList.remove("panning"); selTok = t.id; dirty = true; openTokenPanel(t); } });
+cv.addEventListener("dblclick", e => { if (!isGM) return; const [wx, wy] = toWorld(e.clientX, e.clientY); const t = hitToken(wx, wy); if (t) return openTokenPanel(t); const pr = hitProp(wx, wy); if (pr) openPropPanel(pr); });
+cv.addEventListener("contextmenu", e => { if (!isGM) return; const [wx, wy] = toWorld(e.clientX, e.clientY); const t = hitToken(wx, wy) || hitProp(wx, wy); if (isProp(t)) { e.preventDefault(); drag = null; cv.classList.remove("panning"); selTok = t.id; dirty = true; return openPropPanel(t); } if (t) { e.preventDefault(); drag = null; cv.classList.remove("panning"); selTok = t.id; dirty = true; openTokenPanel(t); } });
 function rotateSel(dir){
   const t = tokens.find(x => x.id === selTok); if (!t || !(isGM || owns(t))) return;
-  const step = G().type === "hex" ? 60 : 45; t.a = (((t.a || 0) + dir * step) % 360 + 360) % 360; dirty = true;
+  const step = isProp(t) ? 90 : G().type === "hex" ? 60 : 45; t.a = (((t.a || 0) + dir * step) % 360 + 360) % 360; dirty = true;
+  if (isProp(t)) { const [x, y] = snapProp(t, t.x, t.y); t.x = x; t.y = y; save("tokens"); return; }
   if (isGM) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); save("tokens"); } else send("tokreq", {id: t.id, a: t.a, who: myNick});
 }
 addEventListener("keydown", e => {
@@ -766,8 +1025,9 @@ addEventListener("keydown", e => {
   if (k === "-") return zoomAt(1 / 1.2);
   if (k === "0") return fit();
   if ((k === "q" || k === "e") && selTok && (tool === "move" || !isGM)) { const t = tokens.find(x => x.id === selTok); if (t && (isGM || owns(t))) { e.preventDefault(); return rotateSel(k === "q" ? -1 : 1); } }
-  const map = {v: "move", r: "ruler", d: "draw", e: "erase", f: "fog", w: "wall"};
-  if (map[k] && (isGM || k === "v" || k === "r")) setTool(map[k]);
+  const map = {v: "move", r: "ruler", d: "draw", e: "erase", f: "fog", w: "wall", m: "spell"};
+  if ((k === "delete" || k === "backspace") && selTpl) { const ct = curTpl(); if (ct && canEditTpl(ct)) { tplRemove(ct); return; } }
+  if (map[k] && (isGM || k === "v" || k === "r" || k === "m")) setTool(map[k]);
   if ((k === "delete" || k === "backspace") && selTok && isGM) { const t = tokens.find(x => x.id === selTok); if (t && confirm(`Remover o token “${t.n || "sem nome"}”?`)) { tokens = tokens.filter(x => x.id !== t.id); selTok = null; save("tokens"); dirty = true; } }
 });
 addEventListener("keyup", e => { if (e.code === "Space") { spaceDown = false; cv.classList.remove("panning"); } });
@@ -775,6 +1035,8 @@ addEventListener("keyup", e => { if (e.code === "Space") { spaceDown = false; cv
 function distSeg(px, py, [x1, y1], [x2, y2]){ const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy; let t = L ? ((px - x1) * dx + (py - y1) * dy) / L : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(px - x1 - t * dx, py - y1 - t * dy); }
 function inTri(p, a, b, c){ const s = (a, b, c) => (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]); const d1 = s(p, a, b), d2 = s(p, b, c), d3 = s(p, c, a); return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)); }
 function hitDrawing(dr, x, y){
+  if (dr.t === "tpl") return inTpl(dr, x, y);
+  if (dr.t === "text") { const fs = 10 + (dr.w || 4) * 3, lines = String(dr.s || "").split("\n"); ctx.save(); ctx.font = `700 ${fs}px "Alegreya Sans", sans-serif`; const w = Math.max(...lines.map(l => ctx.measureText(l).width)); ctx.restore(); return x >= dr.p[0][0] - 4 && x <= dr.p[0][0] + w + 4 && y >= dr.p[0][1] - 4 && y <= dr.p[0][1] + lines.length * fs * 1.15 + 4; }
   const tol = dr.w / 2 + 6 / cam.z, a = dr.p[0], b = dr.p[dr.p.length - 1];
   if (dr.t === "pen" || dr.t === "line") { for (let i = 1; i < dr.p.length; i++) if (distSeg(x, y, dr.p[i - 1], dr.p[i]) <= tol) return true; return dr.p.length === 1 && Math.hypot(a[0] - x, a[1] - y) <= tol; }
   if (dr.t === "circle") return Math.hypot(x - a[0], y - a[1]) <= Math.hypot(b[0] - a[0], b[1] - a[1]) + tol;
@@ -865,17 +1127,18 @@ function apply(d){
 }
 
 // ---------- interface ----------
-function setTool(t){ tool = t; wallDraft = null; cv.className = "t-" + (t === "wall" ? "draw" : t); drawTools(); if (["draw", "fog", "wall"].includes(t) && isGM) openFlyout(t); else closeFlyout(); dirty = true; }
+function setTool(t){ tool = t; wallDraft = null; cv.className = "t-" + (t === "wall" || t === "spell" ? "draw" : t); drawTools(); if ((["draw", "fog", "wall"].includes(t) && isGM) || t === "spell") openFlyout(t); else closeFlyout(); dirty = true; }
 function drawTools(){
   const btn = (t, icon, label, key) => `<button class="tool" data-tool="${t}" aria-pressed="${tool === t}" title="${label} (${key.toUpperCase()})" aria-label="${label}">${icon}<span class="k">${key.toUpperCase()}</span></button>`;
-  $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r")
+  $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r") + btn("spell", I.spell, "Áreas de magia", "m")
     + (isGM ? btn("draw", I.draw, "Desenhar e marcar áreas", "d") + btn("erase", I.erase, "Borracha (apaga desenhos)", "e") + btn("fog", I.fog, "Névoa de guerra", "f") + btn("wall", I.wall, "Paredes e portas (bloqueiam luz e visão)", "w")
-      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
+      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, carroças, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
   $("#tools").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.tool) setTool(b.dataset.tool);
     else if (b.id === "addTok") openTokenPanel(null);
     else if (b.id === "listTok") panelKind === "list" ? closePanel() : openTokenList();
+    else if (b.id === "assetsBtn") panelKind === "assets" ? closePanel() : openAssets();
     else if (b.id === "sceneBtn") panelKind === "scene" ? closePanel() : openScenePanel();
   };
 }
@@ -883,11 +1146,15 @@ function drawTop(){
   $("#topbar").innerHTML = `<div class="title">Mapa da mesa<small>${isGM ? "mestre" : esc(myNick || "jogador")}</small></div><span class="spacer"></span>
     ${isGM ? `<div class="seg light" id="lightSeg" title="Iluminação do mapa">${[["day", "☀ Dia"], ["dim", "🌗 Penumbra"], ["dark", "🌑 Escuro"]].map(([k, l]) => `<button data-light="${k}" aria-pressed="${(scene.light || "day") === k}">${l}</button>`).join("")}</div>
       <button class="btn" id="prevBtn" aria-pressed="${gmPreview}" title="Mostra por cima do mapa o que os jogadores enxergam">${I.eye} Ver como jogadores</button>` : ""}
+    <button class="btn" id="trailBtn" aria-pressed="${showTrails}" title="Mostrar o rastro de todos os tokens">👣 Rastros</button>
+    ${isGM ? `<button class="btn" id="turnBtn" title="Apaga os rastros de todos (começo de um novo turno)">⟳ Novo turno</button>` : ""}
     ${isGM ? `<button class="btn" id="castBtn" title="Faz a tela dos jogadores ir para onde você está olhando">${I.cast} Levar jogadores aqui</button>` : ""}
     <div class="zoom"><button class="btn small" id="zOut" aria-label="Diminuir zoom">${I.minus}</button><span>${Math.round(cam.z * 100)}%</span><button class="btn small" id="zIn" aria-label="Aumentar zoom">${I.plus}</button><button class="btn small" id="zFit" title="Enquadrar o mapa (0)" aria-label="Enquadrar">${I.fit}</button></div>`;
   $("#zOut").onclick = () => zoomAt(1 / 1.2); $("#zIn").onclick = () => zoomAt(1.2); $("#zFit").onclick = fit;
   const ls = $("#lightSeg"); if (ls) ls.onclick = e => { const b = e.target.closest("[data-light]"); if (!b) return; scene.light = b.dataset.light; save("scene"); dirty = true; drawTop(); };
   const pb = $("#prevBtn"); if (pb) pb.onclick = () => { gmPreview = !gmPreview; dirty = true; drawTop(); if (gmPreview && !tokens.some(t => VI(t) && t.o)) toast("Nenhum token de jogador tem visão ainda (aba “Visão e luz” do token)."); };
+  $("#trailBtn").onclick = () => { showTrails = !showTrails; dirty = true; drawTop(); };
+  const tb = $("#turnBtn"); if (tb) tb.onclick = () => { let n = 0; for (const t of tokens) if (t.tr?.length) { t.tr = []; n++; } save("tokens"); dirty = true; selBarKey = ""; toast(n ? "Novo turno: rastros apagados." : "Novo turno."); };
   const cb = $("#castBtn"); if (cb) cb.onclick = () => { const [wx, wy] = toWorld(innerWidth / 2, innerHeight / 2); send("view", {x: wx, y: wy, z: cam.z}); toast("Jogadores levados para a sua visão."); };
 }
 function drawEmpty(){
@@ -908,7 +1175,7 @@ function openFlyout(kind){
   const top = $(`[data-tool="${kind}"]`).getBoundingClientRect().top;
   const f = $("#flyout");
   if (kind === "draw") {
-    const shapes = [["pen", I.pen, "Livre"], ["line", I.line, "Linha"], ["circle", I.circle, "Círculo"], ["cone", I.cone, "Cone"], ["rect", I.rect, "Quadrado"]];
+    const shapes = [["pen", I.pen, "Livre"], ["line", I.line, "Linha"], ["circle", I.circle, "Círculo"], ["cone", I.cone, "Cone"], ["rect", I.rect, "Quadrado"], ["text", "<b style='font:700 15px serif'>T</b>", "Texto"]];
     f.innerHTML = `<div class="flyout" style="top:${top}px"><h4>Desenhar</h4>
       <div class="seg" id="fShapes">${shapes.map(([k, ic, l]) => `<button data-shape="${k}" aria-pressed="${opt.draw === k}">${ic}${l}</button>`).join("")}</div>
       <div class="lbl" style="margin-top:10px">Cor</div><div class="row" id="fColors">${COLORS.map(c => `<button class="sw" data-color="${c}" style="background:${c}" aria-label="Cor ${c}" aria-pressed="${opt.color === c}"></button>`).join("")}</div>
@@ -919,6 +1186,18 @@ function openFlyout(kind){
     $("#fColors").onclick = e => { const b = e.target.closest("[data-color]"); if (b) { opt.color = b.dataset.color; openFlyout("draw"); } };
     $("#fW").oninput = e => opt.width = +e.target.value;
     $("#fClear").onclick = () => { if (!drawings.length) return; if (confirm("Apagar todos os desenhos do mapa?")) { drawings = []; save("drawings"); dirty = true; } };
+  } else if (kind === "spell") {
+    const sp = curSpell();
+    f.innerHTML = `<div class="flyout spellfly" style="top:${Math.max(10, top - 40)}px"><h4>Áreas de magia</h4>
+      <div class="spgrid" id="spGrid">${SPELLS.map((x, i) => `<button data-sp="${i}" aria-pressed="${!spellCustom && spellSel === i}" style="--sc:${x.c}"><span>${x.ic}</span>${esc(x.n)}<small>${x.sh === "line" ? "linha " : x.sh === "cone" ? "cone " : x.sh === "square" ? "cubo " : "raio "}${String(x.r).replace(".", ",")} ${esc(G().unitName)}</small></button>`).join("")}</div>
+      <div class="lbl" style="margin-top:10px">Ajustar antes de colocar</div>
+      <div class="two"><label>Tamanho (${esc(G().unitName)}) <input type="number" id="spR" min="1" step="1.5" value="${sp.r}"></label><label>Cor <input type="color" id="spC" value="${sp.c}"></label></div>
+      <div class="seg" id="spSh" style="margin-top:6px">${[["circle", "Círculo"], ["cone", "Cone"], ["line", "Linha"], ["square", "Cubo"]].map(([k, l]) => `<button data-sh="${k}" aria-pressed="${sp.sh === k}">${l}</button>`).join("")}</div>
+      <p class="hint" style="margin-top:8px">Clique no mapa para colocar. Cone e linha: clique na origem e arraste para mirar. Depois, com Mover (V), arraste a área ou a bolinha branca (girar / tamanho). Delete remove.${isGM ? "" : " Todos veem a sua área enquanto ela existir."}</p></div>`;
+    $("#spGrid").onclick = e => { const b = e.target.closest("[data-sp]"); if (b) { spellSel = +b.dataset.sp; spellCustom = null; openFlyout("spell"); } };
+    const upd = () => { spellCustom = {...curSpell(), r: Math.max(1, parseFloat(String($("#spR").value).replace(",", ".")) || curSpell().r), c: $("#spC").value}; };
+    $("#spR").oninput = upd; $("#spC").oninput = upd;
+    $("#spSh").onclick = e => { const b = e.target.closest("[data-sh]"); if (!b) return; spellCustom = {...curSpell(), sh: b.dataset.sh, wd: b.dataset.sh === "line" ? 1.5 : undefined}; openFlyout("spell"); };
   } else if (kind === "wall") {
     f.innerHTML = `<div class="flyout" style="top:${Math.max(10, top - 60)}px"><h4>Paredes e portas</h4>
       <div class="seg" id="wMode" style="margin-bottom:10px"><button data-wm="wall" aria-pressed="${opt.wall === "wall"}">${I.wall} Parede</button><button data-wm="door" aria-pressed="${opt.wall === "door"}">${I.door} Porta</button><button data-wm="circle" aria-pressed="${opt.wall === "circle"}">${I.circle} Círculo</button><button data-wm="erase" aria-pressed="${opt.wall === "erase"}">${I.erase} Apagar</button></div>
@@ -1093,7 +1372,7 @@ function openTokenPanel(t){
       ${d.img ? `<button class="btn small danger" id="tImgDel">Tirar imagem</button>` : ""}
     </section>
 
-    <div class="acts foot">${isNew ? "" : `<button class="btn small" id="tDup">Duplicar</button><button class="btn small danger" id="tDel">Remover</button>`}<span class="spacer"></span><button class="btn" id="tCancel">Cancelar</button><button class="btn primary" id="tSave">${isNew ? "Colocar" : "Ok"}</button></div>
+    <div class="acts foot">${isNew ? "" : `<button class="btn small" id="tDup">Duplicar</button><button class="btn small danger" id="tDel">Remover</button>`}<span class="spacer"></span><button class="btn small" id="tMine" title="Guarda este token para reusar depois (na Lista de tokens)">☆ Salvar em Meus Tokens</button><button class="btn" id="tCancel">Cancelar</button><button class="btn primary" id="tSave">${isNew ? "Colocar" : "Ok"}</button></div>
   </div>`;
   const P = $("#panel");
   const showTab = k => { tab = k; P.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === k)); P.querySelectorAll("[data-pane]").forEach(x => x.hidden = x.dataset.pane !== k); if (k === "img") prev(); };
@@ -1119,6 +1398,7 @@ function openTokenPanel(t){
   $("#tName").focus();
   $("#tName").onkeydown = e => { if (e.key === "Enter") $("#tSave").click(); };
   $("#tCancel").onclick = closePanel;
+  $("#tMine").onclick = () => { const keep = {n: $("#tName").value.trim() || d.n || "Token", c: d.c, s: d.s || 1, img: $("#tImg").value.trim() || null, b: d.b, bv: d.bv, au: d.au, vi: d.vi, li: d.li, sp: d.sp, dir: d.dir, sn: d.sn}; myTokens.push(keep); saveMyTokens(); toast(`“${keep.n}” salvo em Meus Tokens.`); };
   const numv = sel => Math.max(0, parseFloat(String($(sel).value).replace(",", ".")) || 0);
   const num = v => { const n = String(v).trim().replace(",", "."); return n === "" ? "" : (isNaN(+n) ? n.slice(0, 6) : +n); };
   $("#tSave").onclick = () => {
@@ -1133,8 +1413,8 @@ function openTokenPanel(t){
       img: $("#tImg").value.trim() || null, iz: d.iz || 1,
     };
     if (isNew) {
-      const [wx, wy] = toWorld(innerWidth / 2, innerHeight / 2);
-      const off = tokens.length % 5 * G().size; const [x, y] = vals.sn ? snapPoint(wx + off, wy, vals.s) : [Math.round(wx + off), Math.round(wy)];
+      const [wx, wy] = placeAt();
+      const off = 0; const [x, y] = vals.sn ? snapPoint(wx + off, wy, vals.s) : [Math.round(wx + off), Math.round(wy)];
       const nt = {id: uid(), ...vals, x, y}; tokens.push(nt); selTok = nt.id;
     } else {
       const cur = tokens.find(x => x.id === t.id);   // o mapa pode ter recarregado enquanto a janela estava aberta
@@ -1478,7 +1758,7 @@ async function boot(){
     if (p.x != null) {
       const [x, y] = t.sn === false ? [Math.round(p.x), Math.round(p.y)] : snapPoint(p.x, p.y, t.s || 1);
       if (!validPath(t, p.path)) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a}); return; } // caminho inválido (parede ou longe demais): devolve
-      t.x = x; t.y = y;
+      pushTrail(t, p.path); t.x = x; t.y = y;
     }
     if (p.a != null) t.a = ((+p.a % 360) + 360) % 360;
     if (p.bi != null && t.b?.[p.bi] && isFinite(+p.bv)) t.b[p.bi].v = Math.round(+p.bv);
@@ -1492,6 +1772,12 @@ async function boot(){
   chan.on("broadcast", {event: "state"}, ({payload: p}) => { if (!isGM && p?.col) apply({[p.col]: p.val}); });
   if (!isGM) setInterval(load, 20000);                 // rede de segurança
   chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (r?.id && Array.isArray(r.dice)) addRoll({snd: cleanSnd(r.snd), id: String(r.id), who: String(r.who || "?").slice(0, 30), label: String(r.label || "").slice(0, 30), f: String(r.f || "").slice(0, 60), mod: +r.mod || 0, total: +r.total || 0, dice: r.dice.slice(0, 60).filter(x => x.d >= 2 && x.d <= 1000).map(x => ({d: +x.d, v: +x.v, x: x.x ? 1 : 0})), secret: false}); });
+  chan.on("broadcast", {event: "ping"}, ({payload: p}) => { if (!p || !isFinite(+p.x)) return; addPing(p); if (p.center && !isGM) centerOn(+p.x, +p.y, Math.max(cam.z, .8)); });
+  chan.on("broadcast", {event: "tpl"}, ({payload: p}) => {
+    if (p?.op === "del") { delete ptpls[p.id]; if (selTpl === p.id) { selTpl = null; drawTplBar(); } }
+    else if (p?.op === "set" && p.t?.id && ["circle", "cone", "line", "square"].includes(p.t.sh)) { const t = p.t; ptpls[t.id] = {id: String(t.id), t: "tpl", n: String(t.n || "").slice(0, 30), ic: String(t.ic || "✨").slice(0, 4), sh: t.sh, r: Math.min(60, Math.max(1, +t.r || 3)), wd: +t.wd || undefined, c: /^#[0-9a-f]{6}$/i.test(t.c) ? t.c : "#ffe28a", x: +t.x || 0, y: +t.y || 0, a: +t.a || 0, own: String(t.own || "")}; }
+    dirty = true;
+  });
   chan.on("broadcast", {event: "view"}, ({payload: p}) => { if (!isGM && p) { centerOn(p.x, p.y, p.z); toast("O mestre levou você para esta parte do mapa."); } });
   chan.subscribe(st => { if (st === "SUBSCRIBED") chan.track({name: isGM ? "Mestre" : myNick, role: isGM ? "gm" : "player"}); $("#status").textContent = st === "SUBSCRIBED" ? (isGM ? "ao vivo · jogadores veem o que você fizer" : "ao vivo") : "reconectando…"; });
   drawDiceBar(); drawDiceLog();
