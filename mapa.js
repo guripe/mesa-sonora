@@ -29,6 +29,8 @@ I.spell = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-wid
 I.box = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7 12 3l9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>';
 I.wall = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M3 10h18M3 15h18M9 5v5m6 0v5m-6 0v4m6 0v4"/></svg>';
 I.list = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="4.5" cy="18" r="1.5"/></svg>';
+I.dungeon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 3h7v5h4V3h7v7h-5v4h5v7h-7v-5h-4v5H3v-7h5v-4H3z"/></svg>';
+I.maps = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg>';
 I.door = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 21V4l10-1v18"/><path d="M3 21h18"/><circle cx="12" cy="12" r="1"/></svg>';
 const COLORS = ["#d0a54c", "#c0473a", "#4a72b8", "#5f9a4a", "#8a5bb0", "#e07b2e", "#e8e2d0", "#222222"];
 
@@ -207,6 +209,7 @@ function paint(){
     ctx.save(); ctx.translate(W2 / 2, H2 / 2); ctx.rotate(bgAngle() * Math.PI / 180); ctx.drawImage(img, -w / 2, -h / 2, w, h); ctx.restore();
   }
   else { ctx.fillStyle = "#1b1611"; ctx.fillRect(vw.x0, vw.y0, vw.x1 - vw.x0, vw.y1 - vw.y0); }
+  const gcv = !img && genCanvas(); if (gcv) { const gg = scene.gen; ctx.imageSmoothingEnabled = true; ctx.drawImage(gcv, gg.x0 || 0, gg.y0 || 0, gg.w * gg.s, gg.h * gg.s); }
   // grid
   const g = G();
   if (g.show && g.size * cam.z >= 7) {
@@ -234,6 +237,7 @@ function paint(){
   if (drag?.kind === "draw" && drag.shape) paintDrawing(drag.shape, true);
   // tokens
   const ts = tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t);
+  paintDoors();
   for (const t of ts) if (isProp(t) && (isGM || !t.h)) paintProp(t);
   for (const e of allTpls()) paintTpl(e.t, selTpl === e.t.id);
   if (drag?.kind === "tplnew") paintTpl(drag.t, true);
@@ -376,10 +380,10 @@ function segHit(px, py, dx, dy, [x1, y1, x2, y2]){
   return t >= 0 && u >= -1e-6 && u <= 1 + 1e-6 ? t : Infinity;
 }
 const losCache = new Map();
-function losPoly(x, y, R){ // polígono do que se vê a partir de (x,y) até R, parado pelas paredes
-  const key = `${Math.round(x)},${Math.round(y)},${Math.round(R)},${wallsVer}`;
+function losPoly(x, y, R, skip){ // polígono do que se vê a partir de (x,y) até R, parado pelas paredes (skip = objeto que é a própria fonte de luz)
+  const key = `${Math.round(x)},${Math.round(y)},${Math.round(R)},${wallsVer},${skip || ""}`;
   if (losCache.has(key)) return losCache.get(key);
-  const segs = blocking().filter(([x1, y1, x2, y2]) => !(Math.min(x1, x2) > x + R || Math.max(x1, x2) < x - R || Math.min(y1, y2) > y + R || Math.max(y1, y2) < y - R));
+  const segs = blocking().filter(([x1, y1, x2, y2, own]) => !(skip && own === skip) && !(Math.min(x1, x2) > x + R || Math.max(x1, x2) < x - R || Math.min(y1, y2) > y + R || Math.max(y1, y2) < y - R));
   let poly = null;
   if (segs.length) {
     const B = R * 1.05, box = [[x - B, y - B, x + B, y - B], [x + B, y - B, x + B, y + B], [x + B, y + B, x - B, y + B], [x - B, y + B, x - B, y - B]];
@@ -407,7 +411,8 @@ const VI = t => { // visão com valores padrão (e compatível com a versão ant
   if (v.rb == null && v.r != null) return {rb: v.r, rd: v.r, rk: v.r, ang: v.t === "circle" ? 360 : (v.ang || 90)};
   return {rb: +v.rb || 0, rd: +v.rd || 0, rk: +v.rk || 0, ang: v.ang == null ? 360 : +v.ang};
 };
-const LI = t => { const l = t.li; return l && ((+l.rb || 0) > 0 || (+l.rd || 0) > 0) ? {rb: +l.rb || 0, rd: +l.rd || 0, ang: l.ang == null ? 360 : +l.ang} : null; };
+const LI = t => { const l = t.li; return l && ((+l.rb || 0) > 0 || (+l.rd || 0) > 0) ? {rb: +l.rb || 0, rd: +l.rd || 0, ang: l.ang == null ? 360 : +l.ang, c: l.c || null} : null; };
+const lightSkip = t => isProp(t) ? t.id : 0;
 let RT = null;   // alvo de desenho: null = tela; senão um retângulo do mundo (usado pela memória)
 const cvs = {}; function off(k){ if (RT) k += "_w"; let c = cvs[k]; if (!c) { c = cvs[k] = document.createElement("canvas"); } const W0 = RT ? RT.w : cv.width, H0 = RT ? RT.h : cv.height; if (c.width !== W0 || c.height !== H0) { c.width = W0; c.height = H0; } const x = c.getContext("2d"); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.filter = "none"; x.clearRect(0, 0, c.width, c.height); return [c, x]; }
 const W = x => { if (RT) return x.setTransform(RT.s, 0, 0, RT.s, -RT.x0 * RT.s, -RT.y0 * RT.s); const d = devicePixelRatio || 1; x.setTransform(d * cam.z, 0, 0, d * cam.z, d * cam.x, d * cam.y); };
@@ -419,7 +424,7 @@ function lightMasks(ts){ // B = luz intensa, D = luz fraca ou melhor
   W(bx); W(dx); bx.fillStyle = dx.fillStyle = "#fff";
   for (const t of ts) {
     const l = LI(t); if (!l) continue;
-    const R = unitPx(Math.max(l.rb, l.rd)), poly = losPoly(t.x, t.y, R);
+    const R = unitPx(Math.max(l.rb, l.rd)), poly = losPoly(t.x, t.y, R, lightSkip(t));
     for (const [x, r] of [[bx, unitPx(l.rb)], [dx, unitPx(Math.max(l.rb, l.rd))]]) {
       if (r <= 0) continue;
       x.save(); x.beginPath(); shapePath(x, t.x, t.y, R, 0, 0, poly); x.clip();
@@ -481,9 +486,9 @@ function paintVisionGM(t){ // o mestre vê o alcance da visão (já cortado pela
 }
 function paintLightGlow(t){ // brilho quente das tochas, para todo mundo
   const l = LI(t); if (!l) return;
-  const R = unitPx(Math.max(l.rb, l.rd)), poly = losPoly(t.x, t.y, R);
+  const R = unitPx(Math.max(l.rb, l.rd)), poly = losPoly(t.x, t.y, R, lightSkip(t)), lc = l.c || "#ffbe5a";
   ctx.save(); ctx.beginPath(); shapePath(ctx, t.x, t.y, R, 0, 0, poly); ctx.clip(); ctx.beginPath(); conePath(ctx, t.x, t.y, R, l.ang, t.a || 0); ctx.clip();
-  const g = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, R); g.addColorStop(0, "rgba(255,190,90,.22)"); g.addColorStop(Math.min(.99, unitPx(l.rb) / R || .5), "rgba(255,170,70,.1)"); g.addColorStop(1, "rgba(255,160,60,0)");
+  const g = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, R); g.addColorStop(0, hexA(lc, .26)); g.addColorStop(Math.min(.99, unitPx(l.rb) / R || .5), hexA(lc, .11)); g.addColorStop(1, hexA(lc, 0));
   ctx.fillStyle = g; ctx.fillRect(t.x - R, t.y - R, R * 2, R * 2); ctx.restore();
 }
 function paintWalls(){
@@ -492,7 +497,7 @@ function paintWalls(){
     if (w.c) { ctx.beginPath(); ctx.arc(w.c[0], w.c[1], w.r, 0, Math.PI * 2); ctx.lineWidth = 4 / cam.z; ctx.strokeStyle = "rgba(240,130,60,.9)"; ctx.setLineDash([]); ctx.stroke(); continue; }
     const [x1, y1, x2, y2] = w.p;
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-    if (w.d) { ctx.lineWidth = 7 / cam.z; ctx.strokeStyle = w.o ? "rgba(95,190,110,.9)" : "#b07a3a"; ctx.setLineDash(w.o ? [6 / cam.z, 6 / cam.z] : []); }
+    if (w.d) { ctx.lineWidth = 7 / cam.z; ctx.strokeStyle = w.o ? "rgba(95,190,110,.9)" : w.s ? "#b86ae0" : "#b07a3a"; ctx.setLineDash(w.o ? [6 / cam.z, 6 / cam.z] : []); }
     else { ctx.lineWidth = 4 / cam.z; ctx.strokeStyle = "rgba(240,130,60,.9)"; ctx.setLineDash([]); }
     ctx.stroke();
   }
@@ -530,7 +535,7 @@ function lightAt(x, y, ts){ // 2 = luz intensa, 1 = fraca, 0 = escuro
   for (const t of ts) {
     const l = LI(t); if (!l) continue;
     const d = Math.hypot(x - t.x, y - t.y), R = unitPx(Math.max(l.rb, l.rd)); if (d > R || !inCone(t, x, y, l.ang)) continue;
-    const poly = losPoly(t.x, t.y, R); if (poly && !pointInPoly(x, y, poly)) continue;
+    const poly = losPoly(t.x, t.y, R, lightSkip(t)); if (poly && !pointInPoly(x, y, poly)) continue;
     if (d <= unitPx(l.rb)) return 2; lvl = Math.max(lvl, 1);
   }
   return lvl;
@@ -667,9 +672,9 @@ function propSegs(out){
   for (const t of tokens) {
     if (!isProp(t) || !t.blk) continue;
     const [W, H] = propSize(t), a = (t.a || 0) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
-    if (t.blk === "circle") { const r = Math.min(W, H) / 2 * .8, n = 16; for (let i = 0; i < n; i++) { const a1 = i / n * Math.PI * 2, a2 = (i + 1) / n * Math.PI * 2; out.push([t.x + r * Math.cos(a1), t.y + r * Math.sin(a1), t.x + r * Math.cos(a2), t.y + r * Math.sin(a2)]); } continue; }
+    if (t.blk === "circle") { const r = Math.min(W, H) / 2 * .8, n = 16; for (let i = 0; i < n; i++) { const a1 = i / n * Math.PI * 2, a2 = (i + 1) / n * Math.PI * 2; out.push([t.x + r * Math.cos(a1), t.y + r * Math.sin(a1), t.x + r * Math.cos(a2), t.y + r * Math.sin(a2), t.id]); } continue; }
     const k = .9, P = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => [t.x + u * W / 2 * k * c - v * H / 2 * k * sn, t.y + u * W / 2 * k * sn + v * H / 2 * k * c]);
-    for (let i = 0; i < 4; i++) out.push([...P[i], ...P[(i + 1) % 4]]);
+    for (let i = 0; i < 4; i++) out.push([...P[i], ...P[(i + 1) % 4], t.id]);
   }
 }
 function propSeen(t, vs, ts){
@@ -685,25 +690,45 @@ function placeAt(){ // onde colocar coisas novas: último clique no mapa (se est
   return toWorld(innerWidth / 2, innerHeight / 2);
 }
 function addProp(a, src){
-  const [x0, y0] = placeAt(), t = {id: uid(), k: "prop", n: a.n, img: src || `/assets/${a.id}.svg`, pw: a.w, ph: a.h, a: 0, blk: a.blk || null, sn: true};
+  const [x0, y0] = placeAt(), t = {id: uid(), k: "prop", n: a.n, img: src || `/assets/${a.path || a.id + ".svg"}`, pw: a.w, ph: a.h, a: 0, blk: a.blk || null, sn: true};
+  if (a.li) t.li = {rb: a.li.b * (G().unit || 1), rd: a.li.d * (G().unit || 1), ang: 360, c: a.li.c};
   const [x, y] = snapProp(t, x0, y0); t.x = x; t.y = y;
   tokens.push(t); selTok = t.id; save("tokens"); dirty = true; drawEmpty();
 }
 let myAssets = (() => { try { return JSON.parse(localStorage.getItem("mesa.myassets")) || []; } catch { return []; } })();
 const saveMyAssets = () => { try { localStorage.setItem("mesa.myassets", JSON.stringify(myAssets)); } catch {} };
+const ACAT_IC = {"Natureza": "🌳", "Animais": "🐴", "Construção": "🏠", "Cidade": "⛲", "Móveis": "🪑", "Objetos": "📦", "Masmorra": "💀", "Acampamento": "⛺", "Veículos": "🛒"};
+let assetCat = (() => { try { return localStorage.getItem("mesa.acat") || "Natureza"; } catch { return "Natureza"; } })(), assetQ = "";
+const norm = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 function openAssets(){
   panelKind = "assets";
-  const cats = [...new Set(ASSETS.map(a => a.cat))];
-  const card = (a, i, mine) => `<button class="asset" data-${mine ? "my" : "as"}="${i}" title="${esc(a.n)} · ${a.w}×${a.h} casas${a.blk ? " · bloqueia visão" : ""}"><span class="athumb"><img src="${esc(mine ? a.src : `/assets/${a.id}.svg`)}" alt="" loading="lazy"></span><span class="aname">${esc(a.n)}</span><small>${a.w}×${a.h}</small></button>`;
+  const ORD = Object.keys(ACAT_IC), cats = [...new Set(ASSETS.map(a => a.cat))].sort((a, b) => (ORD.indexOf(a) + 1 || 99) - (ORD.indexOf(b) + 1 || 99));
+  if (assetCat !== "mine" && assetCat !== "light" && !cats.includes(assetCat)) assetCat = cats[0] || "mine";
   $("#panel").innerHTML = `<div class="panel assets-panel" role="dialog" aria-label="Assets"><h3>Assets <button class="btn small" id="pClose">Fechar</button></h3>
-    <p class="hint">Clique para colocar no mapa (no último lugar em que você clicou). Depois arraste, gire pela bolinha branca e edite com dois cliques. Só você mexe neles.</p>
-    ${ASSETS.length ? cats.map(c => `<div class="acat">${esc(c)}</div><div class="agrid">${ASSETS.map((a, i) => a.cat === c ? card(a, i) : "").join("")}</div>`).join("") : `<p class="hint">Carregando…</p>`}
-    <div class="acat">Meus assets</div><div class="agrid">${myAssets.map((a, i) => card(a, i, true)).join("") || `<p class="hint">Nenhum ainda.</p>`}</div>
-    <div class="sub-add"><input type="text" id="maName" placeholder="Nome" maxlength="24"><input type="url" id="maUrl" placeholder="link da imagem (PNG sem fundo fica melhor)"><div class="two"><label>Larg. <input type="number" id="maW" min="1" max="12" value="1"></label><label>Alt. <input type="number" id="maH" min="1" max="12" value="1"></label></div>
-      <div class="acts" style="margin-top:6px"><label class="btn small" style="margin:0;color:var(--ink)">Arquivo…<input type="file" id="maFile" accept="image/*" hidden></label><button class="btn small primary" id="maAdd">＋ Adicionar aos meus assets</button></div></div></div>`;
+    <input type="search" id="aQ" placeholder="Procurar (cavalo, baú, tocha…)" value="${esc(assetQ)}" autocomplete="off">
+    <div class="afolders" id="aCats" role="tablist">${cats.map(c => `<button role="tab" data-cat="${esc(c)}" aria-selected="${assetCat === c}">${ACAT_IC[c] || "📁"} ${esc(c)}<small>${ASSETS.filter(a => a.cat === c).length}</small></button>`).join("")}<button role="tab" data-cat="light" aria-selected="${assetCat === "light"}">✨ Que iluminam<small>${ASSETS.filter(a => a.li).length}</small></button><button role="tab" data-cat="mine" aria-selected="${assetCat === "mine"}">⭐ Meus assets<small>${myAssets.length}</small></button></div>
+    <div id="aBody"></div>
+    <p class="hint">Clique para colocar no mapa (no último lugar em que você clicou). Arraste, gire pela bolinha branca e edite com dois cliques. ✨ = ilumina no escuro.</p></div>`;
   $("#pClose").onclick = closePanel;
-  $("#maFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; toast("Enviando…"); try { $("#maUrl").value = await uploadImage(f, "assets"); if (!$("#maName").value) $("#maName").value = f.name.replace(/\.\w+$/, "").slice(0, 24); toast("Imagem pronta."); } catch (err) { toast("Não enviei: " + err.message); } };
-  $("#maAdd").onclick = () => { const src = $("#maUrl").value.trim(); if (!/^https?:\/\//.test(src)) return toast("Coloque o link ou envie um arquivo."); myAssets.push({n: $("#maName").value.trim() || "Asset", src, w: Math.max(1, Math.min(12, +$("#maW").value || 1)), h: Math.max(1, Math.min(12, +$("#maH").value || 1))}); saveMyAssets(); openAssets(); };
+  const card = (a, key, mine) => `<button class="asset" data-${mine ? "my" : "as"}="${key}" title="${esc(a.n)} · ${a.w}×${a.h} casas${a.blk ? " · bloqueia visão" : ""}${a.li ? " · ilumina" : ""}"><span class="athumb"><img src="${esc(mine ? a.src : `/assets/${a.path || a.id + ".svg"}`)}" alt="" loading="lazy">${a.li ? `<i class="alight" style="--lc:${esc(a.li.c)}">✨</i>` : ""}</span><span class="aname">${esc(a.n)}</span><small>${a.w}×${a.h}</small></button>`;
+  const body = () => {
+    const q = norm(assetQ.trim()), B = $("#aBody"); if (!B) return;
+    $("#aCats").querySelectorAll("[data-cat]").forEach(b => b.setAttribute("aria-selected", !q && b.dataset.cat === assetCat));
+    if (!ASSETS.length) { B.innerHTML = `<p class="hint">Carregando…</p>`; return; }
+    if (q) { const hits = ASSETS.map((a, i) => [a, i]).filter(([a]) => norm(a.n + " " + a.id + " " + a.cat).includes(q)), mine = myAssets.map((a, i) => [a, i]).filter(([a]) => norm(a.n).includes(q));
+      B.innerHTML = hits.length || mine.length ? `<div class="agrid">${hits.map(([a, i]) => card(a, i)).join("")}${mine.map(([a, i]) => card(a, i, true)).join("")}</div>` : `<p class="hint">Nada com “${esc(assetQ)}”.</p>`; return; }
+    if (assetCat === "mine") { B.innerHTML = `<div class="agrid">${myAssets.map((a, i) => card(a, i, true)).join("") || `<p class="hint">Nenhum ainda. Envie abaixo (Shift + clique tira da lista).</p>`}</div>
+      <div class="sub-add"><input type="text" id="maName" placeholder="Nome" maxlength="24"><input type="url" id="maUrl" placeholder="link da imagem (PNG sem fundo fica melhor)"><div class="two"><label>Larg. <input type="number" id="maW" min="1" max="12" value="1"></label><label>Alt. <input type="number" id="maH" min="1" max="12" value="1"></label></div>
+      <div class="acts" style="margin-top:6px"><label class="btn small" style="margin:0;color:var(--ink)">Arquivo…<input type="file" id="maFile" accept="image/*" hidden></label><button class="btn small primary" id="maAdd">＋ Adicionar aos meus assets</button></div></div>`;
+      $("#maFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; toast("Enviando…"); try { $("#maUrl").value = await uploadImage(f, "assets"); if (!$("#maName").value) $("#maName").value = f.name.replace(/\.\w+$/, "").slice(0, 24); toast("Imagem pronta."); } catch (err) { toast("Não enviei: " + err.message); } };
+      $("#maAdd").onclick = () => { const src = $("#maUrl").value.trim(); if (!/^https?:\/\//.test(src)) return toast("Coloque o link ou envie um arquivo."); myAssets.push({n: $("#maName").value.trim() || "Asset", src, w: Math.max(1, Math.min(12, +$("#maW").value || 1)), h: Math.max(1, Math.min(12, +$("#maH").value || 1))}); saveMyAssets(); openAssets(); };
+      return; }
+    const list = ASSETS.map((a, i) => [a, i]).filter(([a]) => assetCat === "light" ? a.li : a.cat === assetCat);
+    B.innerHTML = `<div class="agrid">${list.map(([a, i]) => card(a, i)).join("")}</div>`;
+  };
+  body();
+  $("#aQ").oninput = e => { assetQ = e.target.value; body(); };
+  $("#aCats").onclick = e => { const b = e.target.closest("[data-cat]"); if (!b) return; assetCat = b.dataset.cat; assetQ = ""; $("#aQ").value = ""; try { localStorage.setItem("mesa.acat", assetCat); } catch {} body(); };
   $("#panel").onclick = e => {
     const b = e.target.closest("[data-as],[data-my]"); if (!b) return;
     if (b.dataset.as != null) addProp(ASSETS[+b.dataset.as]);
@@ -719,15 +744,475 @@ function openPropPanel(t){
     <label for="oA">Ângulo: <b id="oAv">${d.a || 0}°</b></label><input type="range" id="oA" min="0" max="359" step="1" value="${d.a || 0}">
     <label for="oB">Bloqueia a visão e a luz</label><select id="oB"><option value="">Não</option><option value="rect" ${d.blk === "rect" ? "selected" : ""}>Sim, no formato retangular</option><option value="circle" ${d.blk === "circle" ? "selected" : ""}>Sim, redondo (árvores, colunas)</option></select>
     <label for="oI">Imagem (link)</label><input type="url" id="oI" value="${esc(d.img || "")}">
+    <div class="lbl" style="margin-top:10px">✨ Emite luz</div>
+    <div class="three"><label>Intensa <input type="number" id="oLb" min="0" step="0.5" value="${d.li?.rb || 0}"></label><label>Fraca <input type="number" id="oLd" min="0" step="0.5" value="${d.li?.rd || 0}"></label><label>Cor <input type="color" id="oLc" value="${esc(d.li?.c || "#ffbe5a")}"></label></div>
+    <p class="hint" style="margin-top:2px">Em ${esc(G().unitName)}. 0 e 0 = não ilumina. Tocha: 6 e 12.</p>
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="oS" ${d.sn !== false ? "checked" : ""}> Agarrar ao grid</label>
     <label class="chk"><input type="checkbox" id="oHid" ${d.h ? "checked" : ""}> Oculto dos jogadores</label>
     <div class="acts foot"><button class="btn small" id="oDup">Duplicar</button><button class="btn small danger" id="oDel">Remover</button><span class="spacer"></span><button class="btn" id="oCancel">Cancelar</button><button class="btn primary" id="oSave">Ok</button></div></div>`;
   $("#pClose").onclick = $("#oCancel").onclick = closePanel;
   $("#oA").oninput = e => $("#oAv").textContent = e.target.value + "°";
   const cur = () => tokens.find(x => x.id === t.id);
-  $("#oSave").onclick = () => { const c = cur(); if (!c) return closePanel(); Object.assign(c, {n: $("#oN").value.trim(), pw: Math.max(1, Math.min(20, +$("#oW").value || 1)), ph: Math.max(1, Math.min(20, +$("#oH").value || 1)), a: +$("#oA").value, blk: $("#oB").value || null, img: $("#oI").value.trim() || c.img, sn: $("#oS").checked, h: $("#oHid").checked}); const [x, y] = snapProp(c, c.x, c.y); c.x = x; c.y = y; save("tokens"); dirty = true; closePanel(); };
+  $("#oSave").onclick = () => { const c = cur(); if (!c) return closePanel(); Object.assign(c, {n: $("#oN").value.trim(), pw: Math.max(1, Math.min(20, +$("#oW").value || 1)), ph: Math.max(1, Math.min(20, +$("#oH").value || 1)), a: +$("#oA").value, blk: $("#oB").value || null, img: $("#oI").value.trim() || c.img, sn: $("#oS").checked, h: $("#oHid").checked}); { const lb = Math.max(0, +$("#oLb").value || 0), ld = Math.max(0, +$("#oLd").value || 0); c.li = lb || ld ? {rb: lb, rd: ld, ang: 360, c: $("#oLc").value} : null; } const [x, y] = snapProp(c, c.x, c.y); c.x = x; c.y = y; save("tokens"); dirty = true; closePanel(); };
   $("#oDel").onclick = () => { tokens = tokens.filter(x => x.id !== t.id); selTok = null; save("tokens"); dirty = true; closePanel(); };
   $("#oDup").onclick = () => { const c0 = cur(); if (!c0) return; const c = JSON.parse(JSON.stringify(c0)); c.id = uid(); c.x += G().size * (c.pw || 1); tokens.push(c); selTok = c.id; save("tokens"); dirty = true; closePanel(); };
+}
+
+// ---------- limites do mapa (imagem ou masmorra gerada) ----------
+function mapBox(){
+  if (scene.bg) { const [w, h] = bgBox(); return [0, 0, w, h]; }
+  const g = scene.gen; if (g && g.w) return [g.x0 || 0, g.y0 || 0, g.w * g.s, g.h * g.s];
+  return null;
+}
+function resetExplore(){ fog.exImg = null; fog.exBox = null; fog.ex = {}; exC = null; exReady = false; exImgSrc = null; }
+const hexA = (c, a) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(c || "")); if (!m) return `rgba(255,180,90,${a})`; const n = parseInt(m[1], 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+
+// ---------- portas (todos veem as portas normais; as secretas só o mestre) ----------
+function paintDoors(){
+  const th = Math.max(4, G().size * .17);
+  ctx.save(); ctx.lineCap = "butt";
+  for (const w of walls()) {
+    if (!w.d || w.s || !w.p) continue;
+    const [x1, y1, x2, y2] = w.p, L = Math.hypot(x2 - x1, y2 - y1); if (!L) continue;
+    if (!w.o) {
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.strokeStyle = "#2e1a0c"; ctx.lineWidth = th + 4; ctx.stroke(); ctx.strokeStyle = "#8a5a2e"; ctx.lineWidth = th; ctx.stroke();
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2; ctx.beginPath(); ctx.arc(mx + (x2 - x1) / L * L * .3, my + (y2 - y1) / L * L * .3, th * .22, 0, Math.PI * 2); ctx.fillStyle = "#d8b04a"; ctx.fill();
+    } else { // aberta: girada a partir da dobradiça
+      const ux = (x2 - x1) / L, uy = (y2 - y1) / L;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - uy * L * .85, y1 + ux * L * .85);
+      ctx.strokeStyle = "#2e1a0c"; ctx.lineWidth = th * .8 + 3; ctx.stroke(); ctx.strokeStyle = "#8a5a2e"; ctx.lineWidth = th * .8; ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// ---------- gerador de masmorras ----------
+function rng(seed){ let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const genOpt = Object.assign({style: "dungeon", w: 44, h: 32, rooms: 9, rmin: 3, rmax: 8, cw: 1, doors: 70, secret: 1, dead: 2, traps: 2, deco: "normal", torches: true, dark: true, seed: 1 + Math.floor(Math.random() * 99999)},
+  (() => { try { return JSON.parse(localStorage.getItem("mesa.genopt")) || {}; } catch { return {}; } })());
+const saveGenOpt = () => { try { localStorage.setItem("mesa.genopt", JSON.stringify(genOpt)); } catch {} };
+const ROOMT = {
+  armazem:   {n: "Armazém",    items: ["caixa", "caixas", "barril", "barris-pilha", "sacos", "saco", "pilha-caixotes", "barril"], wall: ["prateleira"]},
+  cripta:    {n: "Cripta",     items: ["sarcofago", "caixao", "ossos", "cranios", "velas", "lapide", "sarcofago"], wall: []},
+  tesouro:   {n: "Tesouro",    items: ["bau", "bau-aberto", "ouro", "pedestal", "bau-mimico", "ouro"], wall: ["estatua"]},
+  prisao:    {n: "Prisão",     items: ["jaula", "grilhoes", "esqueleto", "balde", "ossos", "jaula"], wall: ["grilhoes"]},
+  templo:    {n: "Templo",     items: ["altar", "circulo-ritual", "velas", "braseiro", "braseiro"], wall: ["estatua"]},
+  quartel:   {n: "Quartel",    items: ["beliche", "beliche", "mesa", "banquinho", "cadeira", "bau", "armas"], wall: ["armas", "armario"]},
+  covil:     {n: "Covil",      items: ["ossos", "cranios", "sangue", "esqueleto", "escombros", "ossos"], wall: []},
+  biblioteca:{n: "Biblioteca", items: ["escrivaninha", "candelabro", "livros", "pergaminho", "cadeira"], wall: ["estante", "estante"]},
+  vazia:     {n: "Sala",       items: ["escombros", "pilar-quebrado", "ossos", "barril", "sangue"], wall: []},
+};
+const CAVE_ITEMS = ["estalagmites", "estalagmites", "cristais", "cogumelos-brilho", "pedra", "pedra-musgo", "rochas", "ossos", "agua-rasa", "cogumelos", "escombros", "pedregulho"];
+function mergeSegs(segs){ // junta pedaços de parede em linha reta
+  const key = (x, y) => x.toFixed(3) + "," + y.toFixed(3), adj = new Map(), used = new Uint8Array(segs.length);
+  segs.forEach((s, i) => { for (const k of [key(s[0], s[1]), key(s[2], s[3])]) { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(i); } });
+  const dir = s => { const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy) || 1; return [dx / L, dy / L]; };
+  const out = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue; used[i] = 1;
+    const [dx, dy] = dir(segs[i]);
+    const grow = (px, py) => { for (;;) {
+      const j = (adj.get(key(px, py)) || []).find(j => { if (used[j]) return false; const [ex, ey] = dir(segs[j]); return Math.abs(Math.abs(ex * dx + ey * dy) - 1) < 1e-6; });
+      if (j == null) return [px, py]; used[j] = 1; const s = segs[j];
+      [px, py] = key(s[0], s[1]) === key(px, py) ? [s[2], s[3]] : [s[0], s[1]];
+    } };
+    const [x2, y2] = grow(segs[i][2], segs[i][3]), [x1, y1] = grow(segs[i][0], segs[i][1]);
+    out.push([x1, y1, x2, y2]);
+  }
+  return out;
+}
+function caveContour(T, W, H){ // marching squares nos centros das casas: chão com cantos cortados + paredes
+  const v = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : (T[y * W + x] ? 1 : 0);
+  const polys = [], segs = [];
+  for (let j = -1; j < H; j++) for (let i = -1; i < W; i++) {
+    const c = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(([x, y]) => ({x: x + .5, y: y + .5, in: v(x, y)}));
+    const n = c.reduce((s, k) => s + k.in, 0); if (!n) continue;
+    const mid = (a, b) => [(a.x + b.x) / 2, (a.y + b.y) / 2];
+    if (n === 2 && c[0].in === c[2].in) { // sela: separa as duas pontas
+      for (const k of c[0].in ? [0, 2] : [1, 3]) { const p = c[k], a = c[(k + 3) % 4], b = c[(k + 1) % 4], m1 = mid(a, p), m2 = mid(p, b); polys.push([m1, [p.x, p.y], m2]); segs.push([...m1, ...m2]); }
+      continue;
+    }
+    const poly = [], ms = [];
+    for (let k = 0; k < 4; k++) {
+      const p = c[k], q = c[(k + 1) % 4];
+      if (p.in) poly.push([p.x, p.y]);
+      if (p.in !== q.in) { const m = mid(p, q); poly.push(m); ms.push(m); }
+    }
+    if (ms.length === 2) segs.push([...ms[0], ...ms[1]]);
+    polys.push(poly);
+  }
+  const seen = new Set(), clean = [];
+  for (const s of segs) { const k1 = s.map(v => v.toFixed(3)).join(","), k2 = [s[2], s[3], s[0], s[1]].map(v => v.toFixed(3)).join(","); if (seen.has(k1) || seen.has(k2) || (s[0] === s[2] && s[1] === s[3])) continue; seen.add(k1); clean.push(s); }
+  return {polys, segs: clean};
+}
+function genMap(o){
+  const R = rng(o.seed), ri = (a, b) => a + Math.floor(R() * (b - a + 1)), pick = a => a[Math.floor(R() * a.length)];
+  const W = Math.max(16, Math.min(120, o.w | 0)), H = Math.max(12, Math.min(120, o.h | 0));
+  let T = new Uint8Array(W * H); const RID = new Int16Array(W * H).fill(-1);
+  const at = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : T[y * W + x];
+  const inside = (x, y) => x >= 1 && y >= 1 && x < W - 1 && y < H - 1;
+  const rooms = [], doorsOut = [], props = [], occ = new Uint8Array(W * H);
+  let start = null, end = null;
+  if (o.style === "cave") {
+    for (let tries = 0; tries < 8; tries++) {
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) T[y * W + x] = inside(x, y) && R() > .44 ? 1 : 0;
+      for (let it = 0; it < 5; it++) {
+        const N = new Uint8Array(W * H);
+        for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { let w = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (!at(x + dx, y + dy)) w++; N[y * W + x] = w >= 5 ? 0 : 1; }
+        T = N;
+      }
+      // fica só com a maior região
+      const lab = new Int32Array(W * H).fill(-1); let best = -1, bestN = 0, id = 0;
+      for (let i = 0; i < W * H; i++) if (T[i] && lab[i] < 0) { let n = 0; const q = [i]; lab[i] = id; while (q.length) { const c = q.pop(); n++; const x = c % W, y = (c / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (!at(nx, ny)) continue; const k = ny * W + nx; if (lab[k] < 0) { lab[k] = id; q.push(k); } } } if (n > bestN) { bestN = n; best = id; } id++; }
+      for (let i = 0; i < W * H; i++) if (lab[i] !== best) T[i] = 0;
+      if (bestN > W * H * .3) break;
+    }
+    const fl = []; for (let i = 0; i < W * H; i++) if (T[i]) fl.push(i);
+    const s0 = fl.reduce((a, b) => (b % W) < (a % W) ? b : a, fl[0]);
+    const dist = new Int32Array(W * H).fill(-1); dist[s0] = 0; const q = [s0]; let far = s0;
+    while (q.length) { const c = q.shift(); const x = c % W, y = (c / W) | 0; if (dist[c] > dist[far]) far = c; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (!at(nx, ny)) continue; const k = ny * W + nx; if (dist[k] < 0) { dist[k] = dist[c] + 1; q.push(k); } } }
+    start = [s0 % W, (s0 / W) | 0]; end = [far % W, (far / W) | 0];
+  } else {
+    const rmin = Math.max(2, o.rmin | 0), rmax = Math.max(rmin, o.rmax | 0);
+    for (let a = 0; a < 600 && rooms.length < o.rooms; a++) {
+      const w = ri(rmin, rmax), h = ri(rmin, rmax), x = ri(2, W - w - 2), y = ri(2, H - h - 2);
+      if (x < 2 || y < 2) continue;
+      if (rooms.some(r => x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y)) continue;
+      rooms.push({x, y, w, h, i: rooms.length});
+    }
+    for (const r of rooms) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) { T[y * W + x] = 1; RID[y * W + x] = r.i; }
+    const cen = r => [r.x + (r.w >> 1), r.y + (r.h >> 1)];
+    const cw = Math.max(1, Math.min(3, o.cw | 0));
+    const dig = (x, y, v) => { for (let a = 0; a < cw; a++) for (let b = 0; b < cw; b++) { const X = x + a, Y = y + b; if (inside(X, Y) && T[Y * W + X] === 0) T[Y * W + X] = v; } };
+    const corridor = (A, B, v) => {
+      let [x, y] = cen(A); const [x2, y2] = cen(B), hf = R() < .5;
+      const stepX = () => { while (x !== x2) { dig(x, y, v); x += Math.sign(x2 - x); } }, stepY = () => { while (y !== y2) { dig(x, y, v); y += Math.sign(y2 - y); } };
+      if (hf) { stepX(); stepY(); } else { stepY(); stepX(); } dig(x, y, v);
+    };
+    // árvore mínima ligando as salas + alguns atalhos
+    const linked = new Set(), con = new Set([0]), dd = (a, b) => Math.hypot(cen(a)[0] - cen(b)[0], cen(a)[1] - cen(b)[1]);
+    while (con.size < rooms.length) {
+      let best = null; for (const i of con) for (const r of rooms) if (!con.has(r.i)) { const d = dd(rooms[i], r); if (!best || d < best[2]) best = [i, r.i, d]; }
+      corridor(rooms[best[0]], rooms[best[1]], 2); con.add(best[1]); linked.add(best[0] + "-" + best[1]); linked.add(best[1] + "-" + best[0]);
+    }
+    for (let k = 0; k < Math.round(rooms.length * .2); k++) { const a = pick(rooms), b = rooms.filter(r => r !== a).sort((p, q) => dd(a, p) - dd(a, q))[ri(0, 2)]; if (b && !linked.has(a.i + "-" + b.i)) { corridor(a, b, 2); linked.add(a.i + "-" + b.i); linked.add(b.i + "-" + a.i); } }
+    // passagens secretas
+    for (let k = 0; k < (o.secret | 0); k++) {
+      const a = pick(rooms), b = rooms.filter(r => r !== a && !linked.has(a.i + "-" + r.i)).sort((p, q) => dd(a, p) - dd(a, q))[0];
+      if (!b) break; const cw0 = cw; o.cw = 1; corridor(a, b, 3); o.cw = cw0; linked.add(a.i + "-" + b.i); linked.add(b.i + "-" + a.i);
+    }
+    // becos sem saída
+    for (let k = 0, g = 0; k < (o.dead | 0) && g < 200; g++) {
+      const cells = []; for (let i = 0; i < W * H; i++) if (T[i] === 2) cells.push(i); if (!cells.length) break;
+      const c = pick(cells), [dx, dy] = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]), len = ri(3, 7); let x = c % W, y = (c / W) | 0, ok = true; const path = [];
+      for (let s = 1; s <= len; s++) { const X = x + dx * s, Y = y + dy * s; if (!inside(X, Y) || at(X, Y) || at(X + dy, Y + dx) || at(X - dy, Y - dx) || at(X + dx, Y + dy) === 1) { ok = false; break; } path.push([X, Y]); }
+      if (!ok || path.length < 3) continue; for (const [X, Y] of path) T[Y * W + X] = 2; k++;
+    }
+    const byX = rooms.slice().sort((a, b) => a.x - b.x); const sR = byX[0], eR = rooms.slice().sort((a, b) => dd(sR, b) - dd(sR, a))[0];
+    if (sR) { start = cen(sR); sR.start = true; } if (eR && eR !== sR) { end = cen(eR); eR.end = true; }
+  }
+  // ---- paredes e portas ----
+  const doorEdge = new Set(), segs = [];
+  if (o.style !== "cave") {
+    for (const r of rooms) {
+      const sides = [ // [células de dentro na borda, célula de fora, aresta]
+        [...Array(r.w)].map((_, k) => [r.x + k, r.y, r.x + k, r.y - 1, [r.x + k, r.y, r.x + k + 1, r.y]]),
+        [...Array(r.w)].map((_, k) => [r.x + k, r.y + r.h - 1, r.x + k, r.y + r.h, [r.x + k, r.y + r.h, r.x + k + 1, r.y + r.h]]),
+        [...Array(r.h)].map((_, k) => [r.x, r.y + k, r.x - 1, r.y + k, [r.x, r.y + k, r.x, r.y + k + 1]]),
+        [...Array(r.h)].map((_, k) => [r.x + r.w - 1, r.y + k, r.x + r.w, r.y + k, [r.x + r.w, r.y + k, r.x + r.w, r.y + k + 1]]),
+      ];
+      r.open = [];
+      for (const side of sides) {
+        let run = [];
+        const flush = () => {
+          if (!run.length) return;
+          const secret = run.some(c => at(c[2], c[3]) === 3);
+          if (run.length <= 3 && (secret || R() * 100 < o.doors)) {
+            const e0 = run[0][4], e1 = run[run.length - 1][4];
+            doorsOut.push([e0[0], e0[1], e1[2], e1[3], secret ? 1 : 0]);
+            for (const c of run) doorEdge.add(c[4].join(","));
+          }
+          for (const c of run) { r.open.push([c[0], c[1]]); occ[c[1] * W + c[0]] = 1; }
+          run = [];
+        };
+        for (const c of side) { if (at(c[2], c[3]) >= 2) run.push(c); else flush(); } flush();
+      }
+    }
+    for (let y = 0; y <= H; y++) for (let x = 0; x < W; x++) { if (!!at(x, y - 1) !== !!at(x, y) && !doorEdge.has([x, y, x + 1, y].join(","))) segs.push([x, y, x + 1, y]); }
+    for (let x = 0; x <= W; x++) for (let y = 0; y < H; y++) { if (!!at(x - 1, y) !== !!at(x, y) && !doorEdge.has([x, y, x, y + 1].join(","))) segs.push([x, y, x, y + 1]); }
+  } else segs.push(...caveContour(T, W, H).segs);
+  const wallsOut = mergeSegs(segs);
+  // ---- objetos ----
+  const A = id => ASSETS.find(a => a.id === id);
+  const free = (x, y, w, h, fl) => { for (let b = y; b < y + h; b++) for (let a = x; a < x + w; a++) { if (!inside(a, b) || occ[b * W + a] || !fl(a, b)) return false; } return true; };
+  const put = (id, x, y, rot = 0, extra = {}) => { const a = A(id); if (!a) return false; const sw = rot % 180 ? a.h : a.w, sh = rot % 180 ? a.w : a.h; for (let b = y; b < y + sh; b++) for (let c = x; c < x + sw; c++) occ[b * W + c] = 1; props.push({id, cx: x + sw / 2, cy: y + sh / 2, a: rot, ...extra}); return true; };
+  const tryPut = (id, fl, box, tries = 30, extra) => { const a = A(id); if (!a) return false; for (let k = 0; k < tries; k++) { const rot = a.w === a.h ? pick([0, 90, 180, 270]) : pick([0, 90]); const sw = rot % 180 ? a.h : a.w, sh = rot % 180 ? a.w : a.h; const x = ri(box[0], box[2] - sw), y = ri(box[1], box[3] - sh); if (x < box[0] || y < box[1]) continue; if (free(x, y, sw, sh, fl)) return put(id, x, y, rot, extra); } return false; };
+  const nDeco = {none: 0, few: 1, normal: 3, lots: 6}[o.deco] ?? 3;
+  if (start) { const [sx, sy] = start; if (!occ[sy * W + sx]) { const a = A("escada-sobe"); if (a && free(sx, sy, 1, 2, (x, y) => at(x, y))) put("escada-sobe", sx, sy); else occ[sy * W + sx] = 1; } }
+  if (end) { const [ex, ey] = end; if (free(ex, ey, 1, 2, (x, y) => at(x, y))) put("escada", ex, ey); else if (free(ex, ey, 1, 1, (x, y) => at(x, y))) put("alcapao", ex, ey); }
+  if (o.style !== "cave") {
+    const types = Object.keys(ROOMT);
+    for (const r of rooms) {
+      const inR = (x, y) => RID[y * W + x] === r.i, box = [r.x, r.y, r.x + r.w, r.y + r.h];
+      r.type = r.end ? pick(["tesouro", "templo", "covil"]) : r.start ? pick(["vazia", "armazem"]) : pick(types);
+      const RT0 = ROOMT[r.type];
+      if (o.torches) { // tochas no meio das paredes
+        const cand = [[r.x + (r.w >> 1), r.y, 0], [r.x + (r.w >> 1), r.y + r.h - 1, 180], [r.x, r.y + (r.h >> 1), 270], [r.x + r.w - 1, r.y + (r.h >> 1), 90]].filter(([x, y]) => !occ[y * W + x]);
+        for (const [x, y, rot] of cand.slice(0, r.w * r.h > 30 ? 4 : 2)) put("tocha-parede", x, y, rot);
+      }
+      if (!nDeco) continue;
+      for (const id of RT0.wall) { // encostados na parede de cima ou de baixo
+        const a = A(id); if (!a) continue;
+        for (let k = 0; k < 12; k++) { const top = R() < .5, x = ri(r.x, r.x + r.w - a.w), y = top ? r.y : r.y + r.h - a.h; if (free(x, y, a.w, a.h, inR)) { put(id, x, y, top ? 0 : 180); break; } }
+      }
+      if (r.type === "templo" && r.w >= 6 && r.h >= 6) for (const [x, y] of [[r.x + 1, r.y + 1], [r.x + r.w - 2, r.y + 1], [r.x + 1, r.y + r.h - 2], [r.x + r.w - 2, r.y + r.h - 2]]) if (free(x, y, 1, 1, inR)) put("coluna", x, y);
+      if ((r.type === "covil" || R() < .25) && r.w >= 3 && r.h >= 3) { const cs = [[r.x, r.y, 0], [r.x + r.w - 2, r.y, 90], [r.x + r.w - 2, r.y + r.h - 2, 180], [r.x, r.y + r.h - 2, 270]]; const [x, y, rot] = pick(cs); if (free(x, y, 2, 2, inR)) put("teia", x, y, rot); }
+      const n = Math.max(1, Math.round(nDeco * Math.min(2, r.w * r.h / 24)));
+      for (let k = 0; k < n; k++) tryPut(pick(RT0.items), inR, box);
+    }
+  } else if (nDeco) {
+    const n = Math.round(nDeco * W * H / 160); const fl = (x, y) => !!at(x, y);
+    for (let k = 0; k < n; k++) tryPut(pick(CAVE_ITEMS), fl, [1, 1, W - 1, H - 1], 40);
+    if (o.torches) for (let k = 0; k < Math.round(W * H / 180); k++) tryPut(pick(["cristais", "cogumelos-brilho", "fogueira"]), fl, [1, 1, W - 1, H - 1], 40);
+  }
+  // armadilhas escondidas nos corredores / túneis
+  for (let k = 0, g = 0; k < (o.traps | 0) && g < 300; g++) {
+    const cells = []; for (let i = 0; i < W * H; i++) if ((o.style === "cave" ? T[i] : T[i] === 2) && !occ[i]) cells.push(i); if (!cells.length) break;
+    const c = pick(cells); put(pick(["espinhos", "alcapao", "espinhos", "buraco"]), c % W, (c / W) | 0, 0, {h: 1, trap: 1}); k++;
+  }
+  let t = ""; for (let i = 0; i < W * H; i++) t += T[i] === 3 ? 2 : T[i];
+  return {w: W, h: H, t, style: o.style === "cave" ? "cave" : "dungeon", walls: wallsOut, doors: doorsOut, props, rooms, start, end};
+}
+// desenho do chão (determinístico a partir de scene.gen.t)
+const genCache = {sig: "", cv: null};
+const hash2 = (x, y, s = 0) => { let h = (x * 374761393 + y * 668265263 + s * 2246822519) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function renderGen(g, S, cvIn){
+  const W = g.w, H = g.h, cvx = cvIn || document.createElement("canvas"); cvx.width = Math.ceil(W * S); cvx.height = Math.ceil(H * S);
+  const x = cvx.getContext("2d"), at = (a, b) => a < 0 || b < 0 || a >= W || b >= H ? 0 : +g.t[b * W + a];
+  x.fillStyle = "#14100d"; x.fillRect(0, 0, cvx.width, cvx.height);
+  for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) if (!at(a, b) && hash2(a, b, 7) < .25) { x.fillStyle = "rgba(60,50,40,.35)"; x.fillRect(a * S + hash2(a, b, 1) * S * .6, b * S + hash2(a, b, 2) * S * .6, S * .25, S * .2); }
+  if (g.style === "cave") {
+    const T = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) T[i] = +g.t[i];
+    const {polys, segs} = caveContour(T, W, H);
+    x.fillStyle = "#5e554a"; x.beginPath(); for (const p of polys) { p.forEach(([u, v], i) => i ? x.lineTo(u * S, v * S) : x.moveTo(u * S, v * S)); x.closePath(); } x.fill();
+    x.save(); x.clip();
+    for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) if (at(a, b)) { const h = hash2(a, b); x.fillStyle = h < .5 ? `rgba(0,0,0,${.05 + h * .12})` : `rgba(255,240,220,${(h - .5) * .08})`; x.beginPath(); x.arc((a + hash2(a, b, 3)) * S, (b + hash2(a, b, 4)) * S, S * (.3 + hash2(a, b, 5) * .5), 0, Math.PI * 2); x.fill(); if (hash2(a, b, 9) < .12) { x.fillStyle = "#4a433a"; x.beginPath(); x.arc((a + .5) * S, (b + .5) * S, S * .12, 0, Math.PI * 2); x.fill(); } }
+    x.restore();
+    x.lineCap = "round"; x.lineJoin = "round";
+    x.strokeStyle = "rgba(0,0,0,.45)"; x.lineWidth = S * .45; x.beginPath(); for (const s of segs) { x.moveTo(s[0] * S, s[1] * S); x.lineTo(s[2] * S, s[3] * S); } x.stroke();
+    x.strokeStyle = "#2c2520"; x.lineWidth = S * .22; x.stroke(); x.strokeStyle = "#4d443a"; x.lineWidth = S * .07; x.stroke();
+    return cvx;
+  }
+  for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) {
+    const v = at(a, b); if (!v) continue;
+    const h = hash2(a, b), base = v === 1 ? [122, 114, 102] : [104, 97, 87], k = .9 + h * .18;
+    x.fillStyle = `rgb(${base.map(c => Math.round(c * k)).join(",")})`; x.fillRect(a * S, b * S, S, S);
+    // lajotas: meia casa, com rejunte
+    x.strokeStyle = "rgba(30,24,20,.45)"; x.lineWidth = Math.max(1, S * .03);
+    if (v === 1) { const off = (b % 2) * S * .5; x.beginPath(); x.moveTo(a * S, b * S + .5); x.lineTo(a * S + S, b * S + .5); x.moveTo(a * S + ((off + S * .5) % S), b * S); x.lineTo(a * S + ((off + S * .5) % S), b * S + S); x.stroke(); }
+    else x.strokeRect(a * S + .5, b * S + .5, S - 1, S - 1);
+    if (h < .1) { x.strokeStyle = "rgba(20,15,12,.6)"; x.beginPath(); x.moveTo(a * S + S * .2, b * S + S * .3); x.lineTo(a * S + S * .5, b * S + S * .55); x.lineTo(a * S + S * .7, b * S + S * .5); x.stroke(); }
+    if (hash2(a, b, 11) < .08) { x.fillStyle = "rgba(60,90,40,.35)"; x.beginPath(); x.arc(a * S + S * hash2(a, b, 12), b * S + S * hash2(a, b, 13), S * .18, 0, Math.PI * 2); x.fill(); }
+  }
+  // sombra e paredes
+  const segs = [];
+  for (let b = 0; b <= H; b++) for (let a = 0; a < W; a++) if (!!at(a, b - 1) !== !!at(a, b)) segs.push([a, b, a + 1, b, at(a, b) ? 1 : -1, 0]);
+  for (let a = 0; a <= W; a++) for (let b = 0; b < H; b++) if (!!at(a - 1, b) !== !!at(a, b)) segs.push([a, b, a, b + 1, 0, at(a, b) ? 1 : -1]);
+  x.lineCap = "square";
+  x.strokeStyle = "rgba(0,0,0,.35)"; x.lineWidth = S * .3; x.beginPath(); for (const [x1, y1, x2, y2, ny, nx] of segs) { const o = S * .18; x.moveTo(x1 * S + nx * o, y1 * S + ny * o); x.lineTo(x2 * S + nx * o, y2 * S + ny * o); } x.stroke();
+  x.beginPath(); for (const s of segs) { x.moveTo(s[0] * S, s[1] * S); x.lineTo(s[2] * S, s[3] * S); }
+  x.strokeStyle = "#241e19"; x.lineWidth = S * .26; x.stroke(); x.strokeStyle = "#51483e"; x.lineWidth = S * .08; x.stroke();
+  return cvx;
+}
+function genCanvas(){
+  const g = scene.gen; if (!g || !g.t) return null;
+  const S = Math.max(8, Math.min(48, g.s || 48)), sig = [g.style, g.w, g.h, S, g.t.length, g.t.slice(0, 40), g.seed].join("|");
+  if (genCache.sig !== sig) { genCache.sig = sig; genCache.cv = renderGen(g, S); }
+  return genCache.cv;
+}
+function applyGen(res, o){
+  if (G().type === "hex") scene.grid = {...scene.grid, type: "square"};
+  const S = G().size, gx = G().ox || 0, gy = G().oy || 0, P = (x, y) => [Math.round((gx + x * S) * 10) / 10, Math.round((gy + y * S) * 10) / 10];
+  scene.walls = res.walls.map(s => ({p: [...P(s[0], s[1]), ...P(s[2], s[3])]})).concat(res.doors.map(d => ({p: [...P(d[0], d[1]), ...P(d[2], d[3])], d: 1, o: 0, ...(d[4] ? {s: 1} : {})})));
+  Object.assign(scene, {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, gen: {v: 1, style: res.style, w: res.w, h: res.h, t: res.t, x0: gx, y0: gy, s: S, seed: o.seed}});
+  if (o.dark) scene.light = "dark";
+  const U = G().unit || 1, chars = tokens.filter(t => !isProp(t));
+  const pr = res.props.map(p => { const a = ASSETS.find(x => x.id === p.id); if (!a) return null; const [x, y] = P(p.cx, p.cy);
+    const t = {id: uid(), k: "prop", n: a.n, img: `/assets/${a.path || a.id + ".svg"}`, pw: a.w, ph: a.h, a: p.a || 0, blk: p.trap ? null : (a.blk || null), sn: true, x, y};
+    if (p.h) t.h = true; if (a.li) t.li = {rb: a.li.b * U, rd: a.li.d * U, ang: 360, c: a.li.c}; return t; }).filter(Boolean);
+  // personagens vão para a entrada
+  if (res.start) {
+    const T = res.t, W = res.w, busy = new Set(res.props.map(p => Math.floor(p.cx) + "," + Math.floor(p.cy))), q = [res.start], seen = new Set([res.start.join(",")]), spots = [];
+    while (q.length && spots.length < chars.length) { const [a, b] = q.shift(); if (+T[b * W + a] && !busy.has(a + "," + b)) spots.push([a, b]); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = (a + dx) + "," + (b + dy); if (!seen.has(k) && a + dx >= 0 && b + dy >= 0 && a + dx < W && b + dy < res.h && +T[(b + dy) * W + a + dx]) { seen.add(k); q.push([a + dx, b + dy]); } } }
+    chars.forEach((t, i) => { const s = spots[i] || res.start; [t.x, t.y] = P(s[0] + .5, s[1] + .5); t.tr = []; });
+  }
+  tokens = chars.concat(pr); resetExplore();
+  wallsVer++; losCache.clear(); selTok = null;
+  save("scene"); save("tokens"); save("fog", false);
+  dirty = true; drawTop(); drawEmpty(); fit();
+}
+let genRes = null, genT = null;
+function openGenPanel(){
+  panelKind = "gen"; const o = genOpt, cave = o.style === "cave";
+  const num = (id, label, v, min, max, unit = "") => `<label class="gnum"><span>${label}</span><input type="number" id="${id}" min="${min}" max="${max}" value="${v}">${unit ? `<small>${unit}</small>` : ""}</label>`;
+  $("#panel").innerHTML = `<div class="panel gen-panel" role="dialog" aria-label="Gerador de masmorras"><h3>Gerador de masmorras <button class="btn small" id="pClose">Fechar</button></h3>
+    <canvas id="genPrev" width="388" height="280" aria-label="Prévia da masmorra"></canvas>
+    <div class="seg" id="gStyle" style="margin:10px 0 4px"><button data-st="dungeon" aria-pressed="${!cave}">🏰 Masmorra</button><button data-st="cave" aria-pressed="${cave}">⛰ Caverna</button></div>
+    <div class="ggrid">
+      ${num("gW", "Largura", o.w, 16, 120, "casas")}${num("gH", "Altura", o.h, 12, 120, "casas")}
+      ${cave ? "" : num("gRooms", "Salas", o.rooms, 2, 40) + num("gCw", "Corredor", o.cw, 1, 3, "casas") + num("gMin", "Sala mín.", o.rmin, 2, 12) + num("gMax", "Sala máx.", o.rmax, 3, 20) + num("gDoors", "Portas", o.doors, 0, 100, "%") + num("gSecret", "Passagens secretas", o.secret, 0, 6) + num("gDead", "Becos sem saída", o.dead, 0, 12)}
+      ${num("gTraps", "Armadilhas escondidas", o.traps, 0, 20)}
+    </div>
+    <label for="gDeco">Decoração</label><select id="gDeco">${[["none", "Nenhuma"], ["few", "Pouca"], ["normal", "Normal"], ["lots", "Muita"]].map(([k, l]) => `<option value="${k}" ${o.deco === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="gTorch" ${o.torches ? "checked" : ""}> ${cave ? "Cristais e fogueiras que iluminam" : "Tochas nas paredes (iluminam)"}</label>
+    <label class="chk"><input type="checkbox" id="gDark" ${o.dark ? "checked" : ""}> Começar no escuro (só vê quem tem luz)</label>
+    <div class="two" style="align-items:end"><label>Semente <input type="number" id="gSeed" value="${o.seed}"></label><button class="btn" id="gNew" title="Outra masmorra com as mesmas opções">🎲 Gerar outra</button></div>
+    <p class="hint" id="gInfo"></p>
+    <div class="acts foot"><span class="spacer"></span><button class="btn primary" id="gUse">Usar no mapa</button></div>
+    <p class="hint">Troca a imagem, as paredes e os objetos do mapa atual (os personagens vão para a escada de entrada). Ctrl+Z desfaz. Para guardar o mapa atual, salve antes em <b>Mapas</b>. Armadilhas ficam ocultas: só você vê.</p></div>`;
+  $("#pClose").onclick = closePanel;
+  const read = () => {
+    const v = (id, d) => { const e = $("#" + id); return e ? (+e.value || d) : d; };
+    Object.assign(genOpt, {w: v("gW", o.w), h: v("gH", o.h), rooms: v("gRooms", o.rooms), cw: v("gCw", o.cw), rmin: v("gMin", o.rmin), rmax: v("gMax", o.rmax), doors: $("#gDoors") ? +$("#gDoors").value : o.doors, secret: $("#gSecret") ? +$("#gSecret").value : o.secret, dead: $("#gDead") ? +$("#gDead").value : o.dead, traps: +$("#gTraps").value || 0, deco: $("#gDeco").value, torches: $("#gTorch").checked, dark: $("#gDark").checked, seed: +$("#gSeed").value || 1});
+    saveGenOpt(); clearTimeout(genT); genT = setTimeout(runGen, 120);
+  };
+  $("#panel").querySelectorAll("input,select").forEach(e => e.onchange = read);
+  $("#gStyle").onclick = e => { const b = e.target.closest("[data-st]"); if (!b) return; genOpt.style = b.dataset.st; saveGenOpt(); openGenPanel(); };
+  $("#gNew").onclick = () => { $("#gSeed").value = 1 + Math.floor(Math.random() * 99999); read(); };
+  $("#gUse").onclick = () => { if (!genRes) return; if ((scene.bg || walls().length || tokens.some(isProp)) && !confirm("Trocar o mapa atual pela masmorra? (Ctrl+Z desfaz)")) return; applyGen(genRes, genOpt); closePanel(); toast("Masmorra pronta!"); };
+  runGen();
+}
+function runGen(){
+  const c = $("#genPrev"); if (!c) return;
+  if (!ASSETS.length) { $("#gInfo").textContent = "Carregando os assets…"; setTimeout(runGen, 400); return; }
+  genRes = genMap({...genOpt});
+  const S = Math.min(c.width / genRes.w, c.height / genRes.h), x = c.getContext("2d");
+  const g = {w: genRes.w, h: genRes.h, t: genRes.t, style: genRes.style}, img = renderGen(g, Math.max(4, S * 2));
+  x.fillStyle = "#0d0b09"; x.fillRect(0, 0, c.width, c.height);
+  const ox = (c.width - genRes.w * S) / 2, oy = (c.height - genRes.h * S) / 2;
+  x.drawImage(img, ox, oy, genRes.w * S, genRes.h * S);
+  let waiting = 0;
+  for (const p of genRes.props) {
+    const a = ASSETS.find(q => q.id === p.id); if (!a) continue; const im = getImg(`/assets/${a.path}`);
+    if (!im) { waiting++; continue; }
+    x.save(); x.translate(ox + p.cx * S, oy + p.cy * S); x.rotate(p.a * Math.PI / 180); if (p.h) x.globalAlpha = .55; x.drawImage(im, -a.w * S / 2, -a.h * S / 2, a.w * S, a.h * S); x.restore();
+  }
+  x.lineWidth = 2; for (const d of genRes.doors) { x.strokeStyle = d[4] ? "#c07ae8" : "#d8a050"; x.beginPath(); x.moveTo(ox + d[0] * S, oy + d[1] * S); x.lineTo(ox + d[2] * S, oy + d[3] * S); x.stroke(); }
+  if (waiting) setTimeout(() => { if ($("#genPrev")) runGen(); }, 350);
+  const nD = genRes.doors.filter(d => !d[4]).length, nS = genRes.doors.length - nD;
+  $("#gInfo").innerHTML = genRes.style === "cave" ? `Caverna ${genRes.w}×${genRes.h} · ${genRes.props.length} objetos` : `${genRes.rooms.length} salas · ${nD} portas${nS ? ` · ${nS} secreta${nS > 1 ? "s" : ""} <span style="color:#c07ae8">(roxas)</span>` : ""} · ${genRes.props.length} objetos`;
+}
+
+// ---------- mapas salvos (pastas) ----------
+const LIB0 = 1000;
+let libList = null, libFolders = [], libClosed = (() => { try { return JSON.parse(localStorage.getItem("mesa.libclosed")) || {}; } catch { return {}; } })(), libBusy = false;
+const saveLibClosed = () => { try { localStorage.setItem("mesa.libclosed", JSON.stringify(libClosed)); } catch {} };
+async function libLoad(){
+  const {data, error} = await sb.from("map_state").select("id, lib:scene->lib, bg:scene->>bg, gs:scene->gen->>style, updated_at").gte("id", 999).order("id");
+  if (error) { toast("Não carreguei os mapas: " + error.message); libList = []; return; }
+  libFolders = (data.find(r => r.id === 999)?.lib?.folders || []).filter(Boolean);
+  libList = data.filter(r => r.id >= LIB0).map(r => ({id: r.id, n: r.lib?.n || `Mapa ${r.id - LIB0 + 1}`, f: r.lib?.f || "", bg: r.bg || null, gs: r.gs || null, at: r.updated_at}));
+  for (const m of libList) if (m.f && !libFolders.includes(m.f)) libFolders.push(m.f);
+}
+async function libSaveFolders(){ const {error} = await sb.from("map_state").upsert({id: 999, scene: {lib: {folders: libFolders}}}); if (error) toast("Não salvei as pastas: " + error.message); }
+function libSnapshot(n, f){ const sc = JSON.parse(JSON.stringify(scene)); sc.lib = {n, f: f || ""}; return {scene: sc, tokens, fog: {on: !!fog.on, cells: fog.cells || {}, exImg: fog.exImg || null, exBox: fog.exBox || null}, drawings, updated_at: new Date().toISOString()}; }
+async function libSaveAs(n, f){
+  if (!libList) await libLoad();
+  const id = Math.max(LIB0 - 1, ...libList.map(m => m.id)) + 1;
+  scene.libId = id; scene.libName = n; scene.libF = f || "";
+  const {error} = await sb.from("map_state").insert({id, ...libSnapshot(n, f)});
+  if (error) { delete scene.libId; return toast("Não salvei: " + error.message); }
+  save("scene", false); drawTop(); toast(`“${n}” salvo nos Mapas.`); await libLoad();
+}
+async function libSaveCur(quiet){
+  if (!scene.libId) return false;
+  const {error, count} = await sb.from("map_state").update(libSnapshot(scene.libName || "Mapa", scene.libF), {count: "exact"}).eq("id", scene.libId);
+  if (error) { toast("Não salvei: " + error.message); return false; }
+  if (!count) { const n = scene.libName || "Mapa"; delete scene.libId; await libSaveAs(n, scene.libF); return true; }
+  if (!quiet) toast(`“${scene.libName}” salvo.`); return true;
+}
+async function libOpen(id){
+  if (libBusy) return; libBusy = true;
+  try {
+    const m = libList.find(x => x.id === id);
+    if (scene.libId && scene.libId !== id) await libSaveCur(true);
+    else if (!scene.libId && (scene.bg || scene.gen || tokens.length || walls().length) && !confirm(`Abrir “${m?.n}”? O mapa de agora não está salvo nos Mapas e vai ser substituído.`)) return;
+    const {data, error} = await sb.from("map_state").select("*").eq("id", id).maybeSingle();
+    if (error || !data) return toast("Não abri: " + (error?.message || "mapa não encontrado"));
+    const sc = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, ...(data.scene || {})};
+    sc.grid = {type: "square", size: 70, ox: 0, oy: 0, color: "#000000", alpha: .35, show: true, unit: 1.5, unitName: "m", ...(data.scene?.grid || {})};
+    sc.libId = id; sc.libName = data.scene?.lib?.n || m?.n || "Mapa"; sc.libF = data.scene?.lib?.f || ""; delete sc.lib;
+    scene = sc; tokens = data.tokens || []; drawings = data.drawings || [];
+    fog = {on: !!data.fog?.on, cells: data.fog?.cells || {}, exImg: data.fog?.exImg || null, exBox: data.fog?.exBox || null}; exC = null; exReady = false; exImgSrc = null;
+    undoS.length = 0; redoS.length = 0; for (const c of ["scene", "tokens", "fog", "drawings"]) { snapPrev(c); lastSave[c] = Date.now(); }
+    wallsVer++; losCache.clear(); selTok = null; tokLive = {};
+    const {error: e2} = await sb.from("map_state").update({scene, tokens, fog, drawings, updated_at: new Date().toISOString()}).eq("id", 1);
+    if (e2) toast("Abri aqui, mas não consegui enviar aos jogadores: " + e2.message);
+    for (const c of ["scene", "tokens", "drawings", "fog"]) { const val = getColFull(c); try { if (JSON.stringify(val).length < 180000) send("state", {col: c, val}); } catch {} }
+    dirty = true; drawTop(); drawEmpty(); fit();
+    const b = mapBox(); if (b) setTimeout(() => send("view", {x: b[0] + b[2] / 2, y: b[1] + b[3] / 2, z: cam.z}), 300);
+    toast(`Mapa “${scene.libName}” aberto.`);
+  } finally { libBusy = false; if (panelKind === "maps") openMapsPanel(); }
+}
+const getColFull = c => c === "scene" ? scene : c === "tokens" ? tokens : c === "fog" ? fog : drawings;
+async function libPatch(id, fn){ // muda nome/pasta de um mapa salvo
+  const {data, error} = await sb.from("map_state").select("scene").eq("id", id).maybeSingle(); if (error || !data) return toast("Não consegui: " + (error?.message || "?"));
+  const sc = data.scene || {}; sc.lib = fn({...(sc.lib || {})});
+  const {error: e2} = await sb.from("map_state").update({scene: sc}).eq("id", id); if (e2) return toast("Não consegui: " + e2.message);
+  if (scene.libId === id) { scene.libName = sc.lib.n; scene.libF = sc.lib.f || ""; save("scene", false); drawTop(); }
+}
+async function openMapsPanel(){
+  panelKind = "maps";
+  if (!libList) { $("#panel").innerHTML = `<div class="panel maps-panel"><h3>Mapas <button class="btn small" id="pClose">Fechar</button></h3><p class="hint">Carregando…</p></div>`; $("#pClose").onclick = closePanel; await libLoad(); if (panelKind !== "maps") return; }
+  const cur = scene.libId ? libList.find(m => m.id === scene.libId) : null;
+  const when = s => { try { return new Date(s).toLocaleDateString("pt-BR", {day: "2-digit", month: "short"}); } catch { return ""; } };
+  const row = m => `<div class="mrow ${m.id === scene.libId ? "on" : ""}" data-mid="${m.id}" draggable="true">
+      <span class="mthumb">${m.bg ? `<img src="${esc(m.bg)}" alt="" loading="lazy">` : m.gs ? (m.gs === "cave" ? "⛰" : "🏰") : "▦"}</span>
+      <span class="mname"><b>${esc(m.n)}</b><small>${m.id === scene.libId ? "aberto agora · " : ""}${when(m.at)}</small></span>
+      <button class="btn small primary" data-open="${m.id}" ${m.id === scene.libId ? "disabled" : ""}>Abrir</button>
+      <button class="btn small ic" data-ren="${m.id}" title="Renomear" aria-label="Renomear">✎</button>
+      <button class="btn small ic" data-dup="${m.id}" title="Duplicar" aria-label="Duplicar">⧉</button>
+      <button class="btn small ic danger" data-del="${m.id}" title="Apagar" aria-label="Apagar">🗑</button></div>`;
+  const groups = [["", "Sem pasta"], ...libFolders.map(f => [f, f])];
+  $("#panel").innerHTML = `<div class="panel maps-panel" role="dialog" aria-label="Mapas salvos"><h3>Mapas <button class="btn small" id="pClose">Fechar</button></h3>
+    <div class="mcur">Aberto agora: <b>${esc(scene.libId ? scene.libName : "mapa sem nome")}</b>${scene.libId ? "" : " <small>(não salvo)</small>"}
+      <div class="acts" style="margin-top:8px">${scene.libId ? `<button class="btn small primary" id="mSave">💾 Salvar</button>` : ""}<button class="btn small ${scene.libId ? "" : "primary"}" id="mSaveAs">Salvar como novo…</button><button class="btn small" id="mBlank" title="Começar um mapa vazio">＋ Mapa vazio</button></div>
+      <form id="mForm" hidden><input type="text" id="mName" maxlength="40" placeholder="Nome do mapa" required><select id="mFolder">${groups.map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join("")}</select><button class="btn small primary">Salvar</button></form></div>
+    <p class="hint">Monte os mapas antes da sessão e na hora é só abrir. Ao abrir outro, o que está aberto é salvo sozinho. Arraste um mapa para outra pasta.</p>
+    <div class="acts"><button class="btn small" id="mNewF">＋ Nova pasta</button></div>
+    ${groups.map(([k, l]) => { const ms = libList.filter(m => m.f === k); if (!k && !ms.length && libFolders.length) return "";
+      return `<div class="mfold" data-fold="${esc(k)}"><div class="mfh"><button class="mft" data-tog="${esc(k)}" aria-expanded="${!libClosed[k]}">${libClosed[k] ? "▸" : "▾"} 📁 ${esc(l)} <small>${ms.length}</small></button>${k ? `<button class="btn small ic" data-fren="${esc(k)}" title="Renomear pasta" aria-label="Renomear pasta">✎</button><button class="btn small ic danger" data-fdel="${esc(k)}" title="Apagar pasta" aria-label="Apagar pasta">🗑</button>` : ""}</div>
+        ${libClosed[k] ? "" : `<div class="mlist">${ms.map(row).join("") || `<p class="hint" style="margin:4px 8px">Vazia.</p>`}</div>`}</div>`; }).join("")}
+    </div>`;
+  $("#pClose").onclick = closePanel;
+  const refresh = async () => { await libLoad(); if (panelKind === "maps") openMapsPanel(); };
+  if ($("#mSave")) $("#mSave").onclick = async () => { await libSaveCur(); refresh(); };
+  $("#mSaveAs").onclick = () => { const f = $("#mForm"); f.hidden = !f.hidden; if (!f.hidden) { $("#mName").value = scene.libId ? scene.libName + " (cópia)" : ""; $("#mFolder").value = scene.libF || ""; $("#mName").focus(); } };
+  $("#mForm").onsubmit = async e => { e.preventDefault(); const n = $("#mName").value.trim(); if (!n) return; await libSaveAs(n, $("#mFolder").value); openMapsPanel(); };
+  $("#mBlank").onclick = async () => {
+    if (scene.libId) await libSaveCur(true); else if ((scene.bg || scene.gen || tokens.length || walls().length) && !confirm("O mapa de agora não está salvo nos Mapas. Começar um vazio mesmo assim?")) return;
+    const chars = tokens.filter(t => !isProp(t));
+    scene = {bg: null, bgW: 0, bgH: 0, bgQ: 0, bgFine: 0, light: "day", walls: [], gen: null, libId: null, libName: null, libF: "", grid: {...scene.grid}}; tokens = chars.map(t => ({...t, tr: []})); drawings = []; fog = {on: false, cells: {}}; resetExplore();
+    wallsVer++; losCache.clear(); save("scene"); save("tokens"); save("drawings"); save("fog", false); dirty = true; drawTop(); drawEmpty(); fit(); openMapsPanel();
+  };
+  $("#mNewF").onclick = async () => { const n = (prompt("Nome da pasta:") || "").trim().slice(0, 30); if (!n) return; if (!libFolders.includes(n)) { libFolders.push(n); await libSaveFolders(); } openMapsPanel(); };
+  const P = $("#panel");
+  P.onclick = async e => {
+    const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
+    if (d.tog != null) { libClosed[d.tog] = !libClosed[d.tog]; saveLibClosed(); openMapsPanel(); }
+    else if (d.open) libOpen(+d.open);
+    else if (d.ren) { const m = libList.find(x => x.id === +d.ren); const n = (prompt("Novo nome:", m.n) || "").trim().slice(0, 40); if (n) { await libPatch(m.id, l => ({...l, n})); refresh(); } }
+    else if (d.dup) { const {data, error} = await sb.from("map_state").select("*").eq("id", +d.dup).maybeSingle(); if (error || !data) return toast("Não consegui duplicar."); const id = Math.max(LIB0 - 1, ...libList.map(m => m.id)) + 1; data.scene = {...(data.scene || {}), lib: {...(data.scene?.lib || {}), n: (data.scene?.lib?.n || "Mapa") + " (cópia)"}}; delete data.scene.libId; const {error: e2} = await sb.from("map_state").insert({...data, id, updated_at: new Date().toISOString()}); if (e2) toast("Não consegui duplicar: " + e2.message); refresh(); }
+    else if (d.del) { const m = libList.find(x => x.id === +d.del); if (!confirm(`Apagar o mapa salvo “${m.n}”? Não dá para desfazer.`)) return; const {error} = await sb.from("map_state").delete().eq("id", m.id); if (error) return toast("Não apaguei: " + error.message); if (scene.libId === m.id) { scene.libId = null; save("scene", false); } refresh(); }
+    else if (d.fren != null) { const old = d.fren, n = (prompt("Novo nome da pasta:", old) || "").trim().slice(0, 30); if (!n || n === old) return; libFolders = libFolders.map(f => f === old ? n : f); await libSaveFolders(); for (const m of libList.filter(m => m.f === old)) await libPatch(m.id, l => ({...l, f: n})); if (libClosed[old]) { libClosed[n] = true; delete libClosed[old]; saveLibClosed(); } refresh(); }
+    else if (d.fdel != null) { const k = d.fdel, ms = libList.filter(m => m.f === k); if (!confirm(ms.length ? `Apagar a pasta “${k}”? Os ${ms.length} mapas dela vão para “Sem pasta”.` : `Apagar a pasta “${k}”?`)) return; libFolders = libFolders.filter(f => f !== k); await libSaveFolders(); for (const m of ms) await libPatch(m.id, l => ({...l, f: ""})); refresh(); }
+  };
+  // arrastar mapas entre pastas
+  P.ondragstart = e => { const r = e.target.closest("[data-mid]"); if (r) { e.dataTransfer.setData("text/mesa-map", r.dataset.mid); e.dataTransfer.effectAllowed = "move"; } };
+  P.ondragover = e => { const f = e.target.closest("[data-fold]"); if (f && [...e.dataTransfer.types].includes("text/mesa-map")) { e.preventDefault(); P.querySelectorAll(".mfold.over").forEach(x => x !== f && x.classList.remove("over")); f.classList.add("over"); } };
+  P.ondragleave = e => { const f = e.target.closest("[data-fold]"); if (f && !f.contains(e.relatedTarget)) f.classList.remove("over"); };
+  P.ondrop = async e => { const f = e.target.closest("[data-fold]"); const id = +e.dataTransfer.getData("text/mesa-map"); P.querySelectorAll(".mfold.over").forEach(x => x.classList.remove("over")); if (!f || !id) return; e.preventDefault(); const k = f.dataset.fold, m = libList.find(x => x.id === id); if (!m || m.f === k) return; m.f = k; openMapsPanel(); await libPatch(id, l => ({...l, f: k})); refresh(); };
 }
 
 // ---------- pings (Alt + clique) ----------
@@ -850,7 +1335,7 @@ function exImage(){ // imagem da memória vinda do banco
   return exImgEl.complete && exImgEl.naturalWidth ? exImgEl : null;
 }
 function exBoxNow(){
-  const [w, h] = scene.bg ? bgBox() : [9000, 9000], x0 = scene.bg ? -200 : -3000, y0 = scene.bg ? -200 : -3000, W2 = w + (scene.bg ? 400 : 0), H2 = h + (scene.bg ? 400 : 0);
+  const mb = mapBox(), [w, h] = mb ? [mb[2], mb[3]] : [9000, 9000], x0 = mb ? mb[0] - 200 : -3000, y0 = mb ? mb[1] - 200 : -3000, W2 = w + (mb ? 400 : 0), H2 = h + (mb ? 400 : 0);
   const s = Math.min(.25, 1600 / Math.max(W2, H2));
   return {x0, y0, w: Math.round(W2 * s), h: Math.round(H2 * s), s, W: W2, H: H2};
 }
@@ -911,8 +1396,8 @@ function bgBox(){ // tamanho da imagem já girada (ela fica encostada no canto 0
   return [Math.abs(w * Math.cos(a)) + Math.abs(h * Math.sin(a)), Math.abs(w * Math.sin(a)) + Math.abs(h * Math.cos(a))];
 }
 function fit(){
-  const [w, h] = scene.bg ? bgBox() : [1600, 1000];
-  cam.z = Math.min(innerWidth / w, innerHeight / h) * .92; cam.x = (innerWidth - w * cam.z) / 2; cam.y = (innerHeight - h * cam.z) / 2; dirty = true; drawTop();
+  const [x0, y0, w, h] = mapBox() || [0, 0, 1600, 1000];
+  cam.z = Math.min(innerWidth / w, innerHeight / h) * .92; cam.x = (innerWidth - w * cam.z) / 2 - x0 * cam.z; cam.y = (innerHeight - h * cam.z) / 2 - y0 * cam.z; dirty = true; drawTop();
 }
 function centerOn(wx, wy, z){ cam.z = z; cam.x = innerWidth / 2 - wx * z; cam.y = innerHeight / 2 - wy * z; dirty = true; drawTop(); }
 
@@ -972,8 +1457,8 @@ cv.addEventListener("pointerdown", e => {
     if (opt.wall === "circle") { const c = snapWall(wx, wy, e.shiftKey); drag = {kind: "wallcircle", c, r: 0}; return; }
     const p = snapWall(wx, wy, e.shiftKey);
     if (!wallDraft) { wallDraft = p; hoverWall = p; dirty = true; return; }
-    if (Math.hypot(p[0] - wallDraft[0], p[1] - wallDraft[1]) > 2) { walls().push({p: [...wallDraft, ...p], d: opt.wall === "door" ? 1 : 0}); wallsChanged(); }
-    wallDraft = opt.wall === "door" ? null : p; dirty = true; return;
+    if (Math.hypot(p[0] - wallDraft[0], p[1] - wallDraft[1]) > 2) { walls().push({p: [...wallDraft, ...p], d: opt.wall === "door" || opt.wall === "secret" ? 1 : 0, ...(opt.wall === "secret" ? {s: 1} : {})}); wallsChanged(); }
+    wallDraft = opt.wall === "door" || opt.wall === "secret" ? null : p; dirty = true; return;
   }
   if (tool === "fog") {
     if (opt.fogShape === "rect") { drag = {kind: "fogrect", a: [wx, wy], b: [wx, wy]}; return; }
@@ -1190,18 +1675,20 @@ function drawTools(){
   const btn = (t, icon, label, key) => `<button class="tool" data-tool="${t}" aria-pressed="${tool === t}" title="${label} (${key.toUpperCase()})" aria-label="${label}">${icon}<span class="k">${key.toUpperCase()}</span></button>`;
   $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r") + btn("spell", I.spell, "Áreas de magia", "m")
     + (isGM ? btn("draw", I.draw, "Desenhar e marcar áreas", "d") + btn("erase", I.erase, "Borracha (apaga desenhos)", "e") + btn("fog", I.fog, "Névoa de guerra", "f") + btn("wall", I.wall, "Paredes e portas (bloqueiam luz e visão)", "w")
-      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, carroças, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
+      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de masmorras" aria-label="Gerador de masmorras">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
   $("#tools").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.tool) setTool(b.dataset.tool);
     else if (b.id === "addTok") openTokenPanel(null);
     else if (b.id === "listTok") panelKind === "list" ? closePanel() : openTokenList();
     else if (b.id === "assetsBtn") panelKind === "assets" ? closePanel() : openAssets();
+    else if (b.id === "genBtn") panelKind === "gen" ? closePanel() : openGenPanel();
+    else if (b.id === "mapsBtn") panelKind === "maps" ? closePanel() : openMapsPanel();
     else if (b.id === "sceneBtn") panelKind === "scene" ? closePanel() : openScenePanel();
   };
 }
 function drawTop(){
-  $("#topbar").innerHTML = `<div class="title">Mapa da mesa<small>${isGM ? "mestre" : esc(myNick || "jogador")}</small></div><span class="spacer"></span>
+  $("#topbar").innerHTML = `<div class="title">${isGM && scene.libName ? esc(scene.libName) : "Mapa da mesa"}<small>${isGM ? "mestre" : esc(myNick || "jogador")}</small></div><span class="spacer"></span>
     ${isGM ? `<div class="seg light" id="lightSeg" title="Iluminação do mapa">${[["day", "☀ Dia"], ["dim", "🌗 Penumbra"], ["dark", "🌑 Escuro"]].map(([k, l]) => `<button data-light="${k}" aria-pressed="${(scene.light || "day") === k}">${l}</button>`).join("")}</div>
       <button class="btn" id="prevBtn" aria-pressed="${gmPreview}" title="Mostra por cima do mapa o que os jogadores enxergam">${I.eye} Ver como jogadores</button>` : ""}
     <button class="btn" id="trailBtn" aria-pressed="${showTrails}" title="Mostrar o rastro de todos os tokens">👣 Rastros</button>
@@ -1217,11 +1704,11 @@ function drawTop(){
 }
 function drawEmpty(){
   let el = $("#emptyMap");
-  const show = isGM && !scene.bg && !tokens.length;
+  const show = isGM && !scene.bg && !scene.gen && !tokens.length;
   if (!show) { el?.remove(); return; }
   if (!el) { el = document.createElement("div"); el.id = "emptyMap"; el.className = "empty-map"; document.body.appendChild(el); }
-  el.innerHTML = `<div><b>Mapa vazio</b>Coloque a imagem de um mapa (link ou arquivo) e ajuste a grid.<br><br><button class="btn primary" id="emptyScene">${I.gear} Configurar mapa</button></div>`;
-  $("#emptyScene").onclick = () => openScenePanel();
+  el.innerHTML = `<div><b>Mapa vazio</b>Coloque a imagem de um mapa (link ou arquivo) e ajuste a grid, gere uma masmorra ou abra um mapa salvo.<br><br><div class="acts" style="justify-content:center"><button class="btn primary" id="emptyScene">${I.gear} Configurar mapa</button><button class="btn" id="emptyGen">${I.dungeon} Gerar masmorra</button><button class="btn" id="emptyMaps">${I.maps} Mapas salvos</button></div></div>`;
+  $("#emptyScene").onclick = () => openScenePanel(); $("#emptyGen").onclick = () => openGenPanel(); $("#emptyMaps").onclick = () => openMapsPanel();
 }
 
 // flyouts de ferramenta
@@ -1258,8 +1745,8 @@ function openFlyout(kind){
     $("#spSh").onclick = e => { const b = e.target.closest("[data-sh]"); if (!b) return; spellCustom = {...curSpell(), sh: b.dataset.sh, wd: b.dataset.sh === "line" ? 1.5 : undefined}; openFlyout("spell"); };
   } else if (kind === "wall") {
     f.innerHTML = `<div class="flyout" style="top:${Math.max(10, top - 60)}px"><h4>Paredes e portas</h4>
-      <div class="seg" id="wMode" style="margin-bottom:10px"><button data-wm="wall" aria-pressed="${opt.wall === "wall"}">${I.wall} Parede</button><button data-wm="door" aria-pressed="${opt.wall === "door"}">${I.door} Porta</button><button data-wm="circle" aria-pressed="${opt.wall === "circle"}">${I.circle} Círculo</button><button data-wm="erase" aria-pressed="${opt.wall === "erase"}">${I.erase} Apagar</button></div>
-      <p class="hint">${opt.wall === "erase" ? "Clique numa parede ou porta para apagar." : opt.wall === "circle" ? "Clique no centro e arraste até o tamanho (bom para troncos de árvore e colunas). Depois dá para arrastar o ponto amarelo (mover) e o azul (tamanho)." : opt.wall === "door" ? "Clique no começo e no fim da porta. Depois, com a ferramenta Mover (V), clique na porta para abrir ou fechar." : "Clique ponto a ponto para desenhar a parede. Enter, Esc ou botão direito terminam. Os pontos grudam nos cantos da grid; segure Shift para soltar. Arraste uma junção (ponto amarelo) para deformar a parede."}</p>
+      <div class="seg" id="wMode" style="margin-bottom:10px"><button data-wm="wall" aria-pressed="${opt.wall === "wall"}">${I.wall} Parede</button><button data-wm="door" aria-pressed="${opt.wall === "door"}">${I.door} Porta</button><button data-wm="secret" aria-pressed="${opt.wall === "secret"}" title="Os jogadores não veem a porta: parece parede até você abrir">${I.door} Secreta</button><button data-wm="circle" aria-pressed="${opt.wall === "circle"}">${I.circle} Círculo</button><button data-wm="erase" aria-pressed="${opt.wall === "erase"}">${I.erase} Apagar</button></div>
+      <p class="hint">${opt.wall === "erase" ? "Clique numa parede ou porta para apagar." : opt.wall === "circle" ? "Clique no centro e arraste até o tamanho (bom para troncos de árvore e colunas). Depois dá para arrastar o ponto amarelo (mover) e o azul (tamanho)." : opt.wall === "door" ? "Clique no começo e no fim da porta. Depois, com a ferramenta Mover (V), clique na porta para abrir ou fechar." : opt.wall === "secret" ? "Porta secreta (roxa): para os jogadores é parede até você abrir. Clique no começo e no fim; abra e feche com Mover (V)." : "Clique ponto a ponto para desenhar a parede. Enter, Esc ou botão direito terminam. Os pontos grudam nos cantos da grid; segure Shift para soltar. Arraste uma junção (ponto amarelo) para deformar a parede."}</p>
       <p class="hint" style="margin-top:6px"><b>Ctrl+Z</b> desfaz, <b>Ctrl+Y</b> refaz.</p>
       <p class="hint" style="margin-top:6px">Paredes bloqueiam a luz e a visão dos jogadores. Só você vê as linhas.</p>
       <div class="row" style="margin:10px 0 0"><button class="btn small danger" id="wClear">Apagar todas as paredes</button></div></div>`;
@@ -1610,10 +2097,16 @@ function logRow(r){
     <div class="dtot">${r.fresh ? "…" : r.total}</div>
     ${nat === "crit" ? '<div class="dtag">⚔️ CRÍTICO!</div>' : nat === "fumble" ? '<div class="dtag">💀 FALHA CRÍTICA</div>' : ""}</div>`;
 }
-function drawDiceLog(){
+let logOpen = (() => { try { return localStorage.getItem("mesa.logopen") !== "0"; } catch { return true; } })(), logUnseen = 0;
+function drawDiceLog(fresh){
   let el = $("#diceLog"); if (!el) { el = document.createElement("div"); el.id = "diceLog"; el.className = "dlog"; el.setAttribute("aria-live", "polite"); document.body.appendChild(el); }
-  el.innerHTML = diceLog.slice(-6).map(logRow).join("");
-  el.scrollTop = el.scrollHeight;
+  if (fresh && !logOpen) logUnseen++;
+  el.classList.toggle("closed", !logOpen);
+  const last = diceLog[diceLog.length - 1];
+  const head = `<button class="dlog-tog" id="logTog" aria-expanded="${logOpen}" title="${logOpen ? "Esconder" : "Mostrar"} o histórico de rolagens">🎲 Histórico${diceLog.length ? ` <small>${diceLog.length}</small>` : ""}${!logOpen && logUnseen ? `<b class="dnew">${logUnseen}</b>` : ""}${!logOpen && last && !last.fresh ? `<span class="dlast">${esc(last.who)}: <b>${last.total}</b></span>` : ""}<span class="chev">${logOpen ? "▾" : "▸"}</span></button>`;
+  el.innerHTML = head + (logOpen ? `<div class="dlog-rows">${diceLog.slice(-6).map(logRow).join("")}</div>` : "");
+  $("#logTog").onclick = () => { logOpen = !logOpen; logUnseen = 0; try { localStorage.setItem("mesa.logopen", logOpen ? "1" : "0"); } catch {} drawDiceLog(); };
+  const rows = el.querySelector(".dlog-rows"); if (rows) rows.scrollTop = rows.scrollHeight;
 }
 function drawDiceBar(){
   let el = $("#diceBar"); if (!el) { el = document.createElement("div"); el.id = "diceBar"; el.className = "dicebar"; document.body.appendChild(el); }
@@ -1701,7 +2194,7 @@ function openDiceModal(focus){
 }
 addEventListener("keydown", e => { if (e.key === "Escape" && diceModal) { e.preventDefault(); closeDiceModal(); } }, true);
 function closeDiceModal(){ diceModal = false; $("#diceModal")?.remove(); }
-const MAP_VER = 15;
+const MAP_VER = 16;
 function newVersion(){ if ($("#verBanner")) return; const b = document.createElement("div"); b.id = "verBanner"; b.className = "toast"; b.style.bottom = "auto"; b.style.top = "64px"; b.innerHTML = "Tem uma versão nova do mapa. Aperte <b>Ctrl + F5</b> para atualizar."; document.body.appendChild(b); }
 const stageQ = []; let stageBusy = false;
 function addRoll(r, mine){
@@ -1711,7 +2204,7 @@ function addRoll(r, mine){
   stageQ.push(r); if (!stageBusy) nextStage();
 }
 function finishRoll(r){
-  r.fresh = false; diceLog.push(r); if (diceLog.length > 50) diceLog.shift(); drawDiceLog();
+  r.fresh = false; diceLog.push(r); if (diceLog.length > 50) diceLog.shift(); drawDiceLog(true);
   if (diceModal && r.mine) openDiceModal("keep");
 }
 function nextStage(){
@@ -1725,7 +2218,7 @@ function nextStage(){
       <div class="ds-f">${esc(r.f)}</div>
       <div class="ds-table">${r.dice.map((x, i) => `<span class="ds-slot" style="--i:${i};--dx:${Math.round((Math.random() * 2 - 1) * 240)}px;--rot:${Math.round((Math.random() * 2 - 1) * 900)}deg">${dieEl(x.d, "?", "huge rolling" + (x.x ? " dropwait" : ""))}<span class="ds-dl">d${x.d}</span></span>`).join("")}${r.mod ? `<span class="ds-mod">${r.mod > 0 ? "+" : "−"}${Math.abs(r.mod)}</span>` : ""}</div>
       <div class="ds-total" aria-live="polite"></div><div class="ds-tag"></div>
-      <div class="ds-hint">clique para fechar</div></div>`;
+      <div class="ds-hint"></div></div>`;
   document.body.appendChild(st);
   const els = [...st.querySelectorAll(".ds-slot .die")], order = r.dice.map((x, i) => i);
   // o d20 que vale fica por último, para o suspense
@@ -1760,7 +2253,7 @@ function nextStage(){
     const nat = natOf(r);
     const tot = st.querySelector(".ds-total"); let k = 0; const steps = 12, from = Math.max(0, r.total - 12);
     const count = () => { if (!st.isConnected) return; k++; tot.textContent = k >= steps ? r.total : Math.round(from + (r.total - from) * k / steps); if (k < steps) setTimeout(count, 22); };
-    tot.classList.add("show"); count(); DS.reveal();
+    tot.classList.add("show"); count(); DS.reveal(); st.querySelector(".ds-hint").textContent = "clique para fechar";
     if (r.sfxDone) return finishRoll(r), setTimeout(close, 1500); r.sfxDone = true;
     if (nat === "crit") { st.classList.add("crit"); st.querySelector(".ds-tag").innerHTML = '<span class="crit-tag">⚔️ CRÍTICO! 20 natural ⚔️</span>'; critBurst(st, els[key]); DS.crit(); }
     else if (nat === "fumble") { st.classList.add("fumble"); st.querySelector(".ds-tag").innerHTML = '<span class="fumble-tag">💀 FALHA CRÍTICA… 1 natural</span>'; fumbleFx(st, els[key]); DS.fumble(); }
@@ -1768,7 +2261,7 @@ function nextStage(){
     setTimeout(close, fast ? 1100 : nat ? 3600 : 2300);
   }
   function close(){ if (done) return; done = true; st.classList.add("out"); setTimeout(() => { st.remove(); nextStage(); }, 300); }
-  st.onclick = () => { if (st.querySelector(".ds-total.show")) close(); else { t0Skip(); } };
+  st.onclick = () => { if (st.querySelector(".ds-total.show")) close(); };   // antes do resultado, clicar não faz nada
   function t0Skip(){ /* pular a animação: revela já */ Object.keys(landAt).forEach(i => landAt[i] = 0); endAt = 0; }
 }
 function critBurst(st, el){
@@ -1804,7 +2297,7 @@ async function boot(){
   $("#gate").hidden = true;
   fit();
   let reloadT = null;
-  sb.channel("mapa-db").on("postgres_changes", {event: "*", schema: "public", table: "map_state"}, () => { clearTimeout(reloadT); reloadT = setTimeout(load, 80); }).subscribe();
+  sb.channel("mapa-db").on("postgres_changes", {event: "*", schema: "public", table: "map_state", filter: "id=eq.1"}, () => { clearTimeout(reloadT); reloadT = setTimeout(load, 80); }).subscribe();
   chan = sb.channel("mapa", {config: {broadcast: {self: false}, presence: {key: myKey}}});
   chan.on("broadcast", {event: "tok"}, ({payload: p}) => {
     if (!p?.id) return;
