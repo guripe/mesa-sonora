@@ -2218,7 +2218,15 @@ function iniMod(t){ // bônus de iniciativa: pega do nome da barra "Ini"/"Inic" 
 }
 function iniAdd(t){ const I = INI(); if (I.list.some(e => e.tk === t.id)) return false; const m = iniMod(t); I.list.push({id: uid(), tk: t.id, n: t.n || "Token", f: `1d20${m ? (m > 0 ? "+" : "") + m : ""}`, v: null, hid: !!t.h}); return true; }
 function iniSave(){ save("scene"); drawTurnBar(); dirty = true; if (panelKind === "ini") openIniPanel(); }
-function iniRoll(e){ try { const r = rollFormula(e.f || "1d20"); e.v = r.total; return r; } catch { e.v = rd(20); return null; } }
+const INI_GRAY = "#8a8a90";
+function iniRoll(e, show = true){
+  let r; try { r = rollFormula(e.f || "1d20"); } catch { r = rollFormula("1d20"); }
+  e.v = r.total; if (!show) return r;
+  const t = iniTok(e), col = t?.o ? (t.c || "#d0a54c") : INI_GRAY, hid = e.hid || t?.h;
+  const roll = {id: uid(), v: MAP_VER, who: e.n || "Criatura", label: "Iniciativa", ...r, secret: !!hid, snd: null, col};
+  if (!hid) send("roll", roll); addRoll(roll, false);
+  return r;
+}
 function iniGo(step){ // próximo / anterior turno
   const I = INI(); if (!I.list.length) return;
   I.cur += step;
@@ -2261,7 +2269,7 @@ function openIniPanel(){
     clearTimeout(P._t); P._t = setTimeout(() => { save("scene", "merge"); drawTurnBar(); }, 400); };
   P.onkeydown = e => e.stopPropagation();
   P.onclick = e => { const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
-    if (d.ir != null) { const en = I.list[+d.ir]; const r = iniRoll(en); if (r) toast(`${en.n}: ${r.total}`, 1400); iniSave(); }
+    if (d.ir != null) { const en = I.list[+d.ir]; iniRoll(en); iniSave(); }
     else if (d.ih != null) { const en = I.list[+d.ih]; en.hid = !en.hid; iniSave(); }
     else if (d.ix != null) { const i = +d.ix; I.list.splice(i, 1); if (I.cur >= I.list.length) I.cur = 0; else if (i < I.cur) I.cur--; iniSave(); } };
   // arrastar as linhas para reordenar
@@ -2319,7 +2327,8 @@ function iniAskPrompt(list){ // jogador: rolar a iniciativa dos seus personagens
   if (DS.init()) DS.tone(DS.ctx.currentTime, 660, .2, .1, "sine");
   box.onclick = ev => { const b = ev.target.closest("[data-ia]"); if (!b) return;
     let r; try { r = rollFormula(b.dataset.f); } catch { r = rollFormula("1d20"); }
-    const roll = {id: uid(), v: MAP_VER, who: myNick || "Jogador", label: "Iniciativa · " + b.dataset.n, ...r, secret: false, snd: null}; send("roll", roll); addRoll(roll, true);
+    const tk = tokens.find(t => owns(t) && (t.n || "") === b.dataset.n) || tokens.find(t => !isProp(t) && owns(t));
+    const roll = {id: uid(), v: MAP_VER, who: b.dataset.n || myNick || "Jogador", label: "Iniciativa", ...r, secret: false, snd: null, col: tk?.c || "#d0a54c"}; send("roll", roll); addRoll(roll, true);
     send("inires", {id: b.dataset.ia, v: r.total, who: myNick}); b.remove(); if (!box.querySelector("[data-ia]")) box.remove(); };
 }
 
@@ -3182,7 +3191,7 @@ function hbEditor(i){
   draw(); setTimeout(() => el.querySelector("#hbN")?.focus(), 30);
 }
 let diceCounts = {}, diceMod = 0, diceAdv = 0, diceSecret = false, diceLog = [], diceText = "", diceModal = false, lastResult = null;
-const dieEl = (d, v, cls = "") => `<span class="die d${d} ${cls}" style="--dc:${dColor(d)};--shape:${dShape(d)}"><span class="die-n">${v}</span></span>`;
+const dieEl = (d, v, cls = "", col) => `<span class="die d${d} ${cls}" style="--dc:${/^#[0-9a-f]{6}$/i.test(col || "") ? col : dColor(d)};--shape:${dShape(d)}"><span class="die-n">${v}</span></span>`;
 const rnd = x => 1 + Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 * x);
 function countsFormula(){ let f = [...DICE].reverse().filter(d => diceCounts[d] > 0).map(d => `${diceCounts[d]}d${d}`).join(" + "); if (diceMod) f += (f ? (diceMod > 0 ? " + " : " − ") : (diceMod > 0 ? "" : "−")) + Math.abs(diceMod); return f; }
 function parseFormula(str){ // "2d20kh1 + 1d6 - 2"
@@ -3276,7 +3285,7 @@ async function playSnd(snd){
 }
 const natOf = r => { const d20 = r.dice.filter(x => x.d === 20 && !x.x); return d20.some(x => x.v === 20) ? "crit" : d20.some(x => x.v === 1) ? "fumble" : ""; };
 function facesHTML(r, big){
-  return r.dice.map(x => dieEl(x.d, r.fresh ? "?" : x.v, (big ? "big2 " : "mini ") + (x.x ? "drop " : "") + (!r.fresh && x.d === 20 && !x.x && (x.v === 20 || x.v === 1) ? (x.v === 20 ? "c20" : "c1") : ""))).join("")
+  return r.dice.map(x => dieEl(x.d, r.fresh ? "?" : x.v, (big ? "big2 " : "mini ") + (x.x ? "drop " : "") + (!r.fresh && x.d === 20 && !x.x && (x.v === 20 || x.v === 1) ? (x.v === 20 ? "c20" : "c1") : ""), r.col)).join("")
     + (r.mod ? `<span class="dmod">${r.mod > 0 ? "+" : "−"}${Math.abs(r.mod)}</span>` : "");
 }
 function logRow(r){
@@ -3394,7 +3403,7 @@ function nextStage(){
   st.innerHTML = `<div class="ds-card">
       <div class="ds-who"><b>${esc(r.who)}</b> ${r.label ? `rola <i>${esc(r.label)}</i>` : "rola os dados"}${r.secret ? " · secreta" : ""}</div>
       <div class="ds-f">${esc(r.f)}</div>
-      <div class="ds-table">${r.dice.map((x, i) => `<span class="ds-slot" style="--i:${i};--dx:${Math.round((Math.random() * 2 - 1) * 240)}px;--rot:${Math.round((Math.random() * 2 - 1) * 900)}deg">${dieEl(x.d, "?", "huge rolling" + (x.x ? " dropwait" : ""))}<span class="ds-dl">d${x.d}</span></span>`).join("")}${r.mod ? `<span class="ds-mod">${r.mod > 0 ? "+" : "−"}${Math.abs(r.mod)}</span>` : ""}</div>
+      <div class="ds-table">${r.dice.map((x, i) => `<span class="ds-slot" style="--i:${i};--dx:${Math.round((Math.random() * 2 - 1) * 240)}px;--rot:${Math.round((Math.random() * 2 - 1) * 900)}deg">${dieEl(x.d, "?", "huge rolling" + (x.x ? " dropwait" : ""), r.col)}<span class="ds-dl">d${x.d}</span></span>`).join("")}${r.mod ? `<span class="ds-mod">${r.mod > 0 ? "+" : "−"}${Math.abs(r.mod)}</span>` : ""}</div>
       <div class="ds-total" aria-live="polite"></div><div class="ds-tag"></div>
       <div class="ds-hint"></div></div>`;
   document.body.appendChild(st);
@@ -3548,7 +3557,7 @@ async function boot(){
   chan.on("broadcast", {event: "ruler"}, ({payload: p}) => { if (!p?.k) return; if (p.r) rulers[p.k] = p.r; else delete rulers[p.k]; dirty = true; });
   chan.on("broadcast", {event: "state"}, ({payload: p}) => { if (!isGM && p?.col) apply({[p.col]: p.val}); });
   if (!isGM) setInterval(load, 20000);                 // rede de segurança
-  chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (+r?.v > MAP_VER) newVersion(); if (r?.id && Array.isArray(r.dice) && !diceLog.some(x => x.id === String(r.id)) && !stageQ.some(x => x.id === String(r.id))) addRoll({snd: cleanSnd(r.snd), id: String(r.id), who: String(r.who || "?").slice(0, 30), label: String(r.label || "").slice(0, 30), f: String(r.f || "").slice(0, 60), mod: +r.mod || 0, total: +r.total || 0, dice: r.dice.slice(0, 60).filter(x => x.d >= 2 && x.d <= 1000).map(x => ({d: +x.d, v: +x.v, x: x.x ? 1 : 0})), secret: false}); });
+  chan.on("broadcast", {event: "roll"}, ({payload: r}) => { if (+r?.v > MAP_VER) newVersion(); if (r?.id && Array.isArray(r.dice) && !diceLog.some(x => x.id === String(r.id)) && !stageQ.some(x => x.id === String(r.id))) addRoll({snd: cleanSnd(r.snd), id: String(r.id), who: String(r.who || "?").slice(0, 30), label: String(r.label || "").slice(0, 30), f: String(r.f || "").slice(0, 60), mod: +r.mod || 0, total: +r.total || 0, dice: r.dice.slice(0, 60).filter(x => x.d >= 2 && x.d <= 1000).map(x => ({d: +x.d, v: +x.v, x: x.x ? 1 : 0})), secret: false, col: /^#[0-9a-f]{6}$/i.test(r.col || "") ? r.col : null}); });
   chan.on("broadcast", {event: "ping"}, ({payload: p}) => { if (!p || !isFinite(+p.x)) return; addPing(p); if (p.center && !isGM) centerOn(+p.x, +p.y, Math.max(cam.z, .8)); });
   chan.on("broadcast", {event: "tpl"}, ({payload: p}) => {
     if (p?.op === "del") { delete ptpls[p.id]; if (selTpl === p.id) { selTpl = null; drawTplBar(); } }
