@@ -913,11 +913,32 @@ function playerDoor(w){
   toast(w.o ? "Você abriu a porta." : "Você fechou a porta.", 1500);
 }
 // ---------- paredes que os jogadores enxergam (a escuridão esconde as que ainda não foram vistas) ----------
+// passagens secretas fechadas: acha o lado "de trás" (o corredor escondido) pelas paredes que saem das duas pontas da porta
+function secretHides(){
+  const out = [], ws = walls(), eq = (a, b, c, d) => Math.abs(a - c) < 1 && Math.abs(b - d) < 1;
+  for (const d of ws) { if (!d.d || !d.s || d.o || !d.p) continue;
+    const [x1, y1, x2, y2] = d.p, L = Math.hypot(x2 - x1, y2 - y1); if (!L) continue; const ux = (x2 - x1) / L, uy = (y2 - y1) / L, nx = -uy, ny = ux;
+    const side = [0, 0]; // [um lado, outro lado] para cada ponta
+    const hit = [[0, 0], [0, 0]];
+    for (const w of ws) { if (w.d || !w.p) continue; for (const [ex, ey] of [[x1, y1], [x2, y2]]) for (const [a, b, c, e] of [[w.p[0], w.p[1], w.p[2], w.p[3]], [w.p[2], w.p[3], w.p[0], w.p[1]]]) {
+      if (!eq(a, b, ex, ey)) continue; const vx = c - a, vy = e - b, vl = Math.hypot(vx, vy); if (!vl || Math.abs((vx * ux + vy * uy) / vl) > .2) continue;
+      const k = (vx * nx + vy * ny) > 0 ? 0 : 1, pi = ex === x1 && ey === y1 ? 0 : 1; hit[k][pi] = 1; } }
+    const far = hit[0][0] && hit[0][1] ? 1 : hit[1][0] && hit[1][1] ? -1 : 0;
+    out.push({p: d.p, fx: nx * far, fy: ny * far, far}); }
+  return out;
+}
+function hiddenBySecret(w, hs){ // parede do corredor secreto que encosta na passagem (do lado de trás)
+  if (!w.p || !hs.length) return false;
+  for (const h of hs) { if (!h.far) continue; const [x1, y1, x2, y2] = h.p;
+    for (const [a, b, c, e] of [[w.p[0], w.p[1], w.p[2], w.p[3]], [w.p[2], w.p[3], w.p[0], w.p[1]]]) for (const [ex, ey] of [[x1, y1], [x2, y2]])
+      if (Math.abs(a - ex) < 1 && Math.abs(b - ey) < 1 && ((c - a) * h.fx + (e - b) * h.fy) > 1) return true; }
+  return false;
+}
 function paintWallsPlayer(c, own){ // c já com a transformação do mundo
   const ws = walls(); if (!ws.some(w => !w.d)) return false; c.save();
   const th = Math.max(3 / cam.z, G().size * .09);
   if (own) c.save(); c.lineCap = "round"; c.lineJoin = "round";
-  c.beginPath(); for (const w of ws) { if (w.d && !(w.s && !w.o)) continue;  // passagem secreta fechada = parede para o jogador
+  const hs = secretHides(); c.beginPath(); for (const w of ws) { if (w.d && !(w.s && !w.o)) continue; if (!w.d && hiddenBySecret(w, hs)) continue;  // passagem secreta fechada = parede para o jogador
     if (w.c) { c.moveTo(w.c[0] + w.r, w.c[1]); c.arc(w.c[0], w.c[1], w.r, 0, Math.PI * 2); } else if (w.p) { c.moveTo(w.p[0], w.p[1]); c.lineTo(w.p[2], w.p[3]); } }
   c.strokeStyle = "rgba(0,0,0,.8)"; c.lineWidth = th + 4 / cam.z; c.stroke();
   c.strokeStyle = "#efe2c4"; c.lineWidth = th; c.stroke();
@@ -1186,7 +1207,15 @@ function renderGen(g, S, cvIn){
   for (let a = 0; a <= W; a++) for (let b = 0; b < H; b++) if (!!at(a - 1, b) !== !!at(a, b)) segs.push([a, b, a, b + 1, 0, at(a, b) ? 1 : -1]);
   if (g.nx?.length) { const nx = new Set(g.nx); for (let i = segs.length - 1; i >= 0; i--) if (nx.has(segs[i].slice(0, 4).join(","))) segs.splice(i, 1); }
   for (const s of g.iw || []) segs.push([s[0], s[1], s[2], s[3], 0, 0]);
-  for (const s of g.sw || []) { const v = s[0] === s[2]; segs.push([s[0], s[1], s[2], s[3], v ? 0 : 1, v ? 1 : 0], [s[0], s[1], s[2], s[3], v ? 0 : -1, v ? -1 : 0]); }  // passagem secreta fechada: parede igual às outras (só para os jogadores)
+  for (const s of g.sw || []) { const [x1, y1, x2, y2, fx, fy] = s, v = x1 === x2;
+    if (fx || fy) { // apaga o começo do corredor escondido (1 casa) e as paredinhas dele, e faz a sombra só do lado de cá
+      const ax = Math.min(x1, x2), ay = Math.min(y1, y2), bx = Math.max(x1, x2), by = Math.max(y1, y2);
+      const rx0 = fx > 0 ? ax : fx < 0 ? ax - 1 : ax, ry0 = fy > 0 ? ay : fy < 0 ? ay - 1 : ay, rw = v ? 1 : bx - ax, rh = v ? by - ay : 1;
+      x.fillStyle = "#14100d"; x.fillRect(rx0 * S, ry0 * S, rw * S, rh * S);
+      for (let i = segs.length - 1; i >= 0; i--) { const q = segs[i], perp = v ? q[1] === q[3] : q[0] === q[2]; if (!perp) continue;
+        const inX = q[0] >= rx0 && q[2] <= rx0 + rw, inY = q[1] >= ry0 && q[3] <= ry0 + rh; if (inX && inY) segs.splice(i, 1); }
+      segs.push([x1, y1, x2, y2, -fy, -fx]);
+    } else segs.push([x1, y1, x2, y2, v ? 0 : 1, v ? 1 : 0], [x1, y1, x2, y2, v ? 0 : -1, v ? -1 : 0]); }  // passagem secreta fechada: parede igual às outras (só para os jogadores)
   x.lineCap = "square";
   x.strokeStyle = "rgba(0,0,0,.35)"; x.lineWidth = S * .3; x.beginPath(); for (const [x1, y1, x2, y2, ny, nx] of segs) { const o = S * .18; x.moveTo(x1 * S + nx * o, y1 * S + ny * o); x.lineTo(x2 * S + nx * o, y2 * S + ny * o); } x.stroke();
   x.beginPath(); for (const s of segs) { x.moveTo(s[0] * S, s[1] * S); x.lineTo(s[2] * S, s[3] * S); }
@@ -1195,7 +1224,7 @@ function renderGen(g, S, cvIn){
 }
 function genCanvas(){
   const g0 = scene.gen; if (!g0 || !g0.t) return null;
-  const sw = (!isGM || gmPreview) && !OUT_STYLES.has(g0.style) ? walls().filter(w => w.d && w.s && !w.o && w.p).map(w => w.p.map((v, i) => Math.round((v - (i % 2 ? g0.y0 || 0 : g0.x0 || 0)) / g0.s * 2) / 2)) : [];
+  const sw = (!isGM || gmPreview) && !OUT_STYLES.has(g0.style) ? secretHides().map(h => [...h.p.map((v, i) => Math.round((v - (i % 2 ? g0.y0 || 0 : g0.x0 || 0)) / g0.s * 2) / 2), Math.round(h.fx), Math.round(h.fy)]) : [];
   const g = sw.length ? {...g0, sw} : g0;
   const S = Math.max(8, Math.min(48, g.s || 48, 2800 / Math.max(g.w, g.h))), sig = [g.style, g.w, g.h, S, g.seed, g.ver || 0, JSON.stringify(g.iw || []), JSON.stringify(g.nx || []), JSON.stringify(sw)].join("|");
   if (genCache.sig !== sig || genCache.t !== g.t) { genCache.sig = sig; genCache.t = g.t; genCache.cv = renderGen(g, S); }   // compara o desenho inteiro, não só o começo
