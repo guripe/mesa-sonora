@@ -177,11 +177,12 @@ function lightMasks(ts) {
   for (const t of ts) {
     const l = LI(t);
     if (!l) continue;
-    const R = unitPx(Math.max(l.rb, l.rd)),
+    const fl = fireOn && isFire(t) ? flick(t) : 1,
+      R = unitPx(Math.max(l.rb, l.rd)) * (fl !== 1 ? 1.08 : 1),
       poly = losPoly(t.x, t.y, R, lightSkip(t));
     for (const [x, r] of [
-      [bx, unitPx(l.rb)],
-      [dx, unitPx(Math.max(l.rb, l.rd))],
+      [bx, unitPx(l.rb) * fl],
+      [dx, unitPx(Math.max(l.rb, l.rd)) * fl],
     ]) {
       if (r <= 0) continue;
       x.save();
@@ -360,18 +361,20 @@ function paintLightGlow(t) {
   // brilho quente das tochas, para todo mundo
   const l = LI(t);
   if (!l) return;
-  const R = unitPx(Math.max(l.rb, l.rd)),
-    poly = losPoly(t.x, t.y, R, lightSkip(t)),
+  const fl = fireOn && isFire(t) ? flick(t) : 1,
+    R0 = unitPx(Math.max(l.rb, l.rd)) * (fl !== 1 ? 1.08 : 1),
+    R = unitPx(Math.max(l.rb, l.rd)) * fl,
+    poly = losPoly(t.x, t.y, R0, lightSkip(t)),
     lc = l.c || "#ffbe5a";
   ctx.save();
   ctx.beginPath();
-  shapePath(ctx, t.x, t.y, R, 0, 0, poly);
+  shapePath(ctx, t.x, t.y, R0, 0, 0, poly);
   ctx.clip();
   ctx.beginPath();
   conePath(ctx, t.x, t.y, R, l.ang, t.a || 0);
   ctx.clip();
   const g = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, R);
-  g.addColorStop(0, hexA(lc, 0.26));
+  g.addColorStop(0, hexA(lc, Math.min(0.4, 0.26 * (1 + (fl - 1) * 3))));
   g.addColorStop(Math.min(0.99, unitPx(l.rb) / R || 0.5), hexA(lc, 0.11));
   g.addColorStop(1, hexA(lc, 0));
   ctx.fillStyle = g;

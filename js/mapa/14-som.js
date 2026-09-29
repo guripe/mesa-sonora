@@ -109,12 +109,10 @@ function zoneTick() {
   const now = performance.now();
   if (now - zoneT < 900) return;
   zoneT = now;
-  const all = tokens
-      .map(t => (tokLive[t.id] ? { ...t, ...tokLive[t.id] } : t))
-      .filter(t => !isProp(t) && !t.h),
+  const all = tokens.map(t => (tokLive[t.id] ? { ...t, ...tokLive[t.id] } : t)).filter(t => !isProp(t) && !t.h),
     own = all.filter(t => t.o),
-    pcs = own.length ? own : all,
-    want = {}; // sem tokens de jogador no mapa: qualquer token liga (para o mestre testar)
+    pcs = own.length ? own : all.filter(t => !t.st), // sem personagens de jogador: tokens comuns (não criaturas do bestiário) ligam, para o mestre testar
+    want = {};
   for (const z of Z) {
     if (!z.s || !sndById(z.s)) continue;
     const R = (+z.r || 4) * G().size;
@@ -126,24 +124,19 @@ function zoneTick() {
       want[z.s] = Math.max(want[z.s] || 0, v);
     }
   }
-  const amb = { ...liveMap.amb };
+  // os sons usados pelas regiões são sempre controlados por elas (mesmo que já estivessem tocando antes)
+  const amb = { ...liveMap.amb }, mine = new Set(Z.map(z => z.s).filter(Boolean));
   let ch = false;
-  for (const sid in zoneOn)
-    if (!(sid in want)) {
-      delete amb[sid];
+  for (const sid of new Set([...mine, ...Object.keys(zoneOn)])) {
+    if (sid in want) {
+      const cur = amb[sid];
+      if (!cur) { amb[sid] = { at: Date.now(), vol: want[sid] }; ch = true; }
+      else if (Math.abs((cur.vol ?? 0) - want[sid]) >= 0.05) { amb[sid] = { ...cur, vol: want[sid] }; ch = true; }
+      zoneOn[sid] = 1;
+    } else {
+      if (amb[sid]) { delete amb[sid]; ch = true; }
       delete zoneOn[sid];
-      ch = true;
     }
-  for (const sid in want) {
-    const cur = amb[sid];
-    if (!cur) {
-      amb[sid] = { at: Date.now(), vol: want[sid] };
-      ch = true;
-    } else if (zoneOn[sid] && Math.abs((cur.vol ?? 0) - want[sid]) >= 0.05) {
-      amb[sid] = { ...cur, vol: want[sid] };
-      ch = true;
-    }
-    if (!cur || zoneOn[sid]) zoneOn[sid] = 1;
   }
   if (ch) liveSet({ ...liveMap, amb });
 }
@@ -164,7 +157,6 @@ function paintZones() {
     ctx.strokeStyle = sel ? "#ffd76a" : on ? "rgba(120,220,180,.8)" : "rgba(120,180,220,.55)";
     ctx.stroke();
     ctx.setLineDash([]);
-    label(z.x, z.y - (edit ? 18 / cam.z : 0), `🔊 ${z.s ? sndName(sndById(z.s)) : "escolha o som"} · ${Math.round((z.v ?? 0.7) * 100)}%`);
     if (edit) {
       for (const [hx, hy, big] of [[z.x, z.y, 1], [z.x + R, z.y, 0]]) {
         ctx.beginPath(); ctx.arc(hx, hy, (big ? 8 : 7) / cam.z, 0, Math.PI * 2);

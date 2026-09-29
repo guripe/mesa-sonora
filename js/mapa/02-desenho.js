@@ -314,6 +314,7 @@ function openTokenList() {
 function frame() {
   if (isGM && scene.snd?.z?.length) zoneTick();
   if (pings.length || smoothBusy || walking || speakSet.size) dirty = true;
+  if (!dirty) { const now = performance.now(); if (now - fireT > 55) { fireT = now; if (fireVisible()) dirty = true; } }   // fogo animado (~18 quadros por segundo)
   if (dirty) {
     dirty = false;
     paint();
@@ -406,6 +407,8 @@ function paint() {
   if (drag?.kind === "tplnew") paintTpl(drag.t, true);
   for (const t of ts) if (!isProp(t) && (isGM || !t.h) && (showTrails || selTok === t.id)) paintTrail(t);
   for (const t of ts) if (isGM || !t.h) paintLightGlow(t);
+  paintFlames(ts);
+  paintTokShadows(ts);
   for (const t of ts) if (isGM || !t.h) paintAura(t);
   if (isGM && !gmPreview) for (const t of ts) if (VI(t)) paintVisionGM(t);
   const vsP = !isGM ? viewers() : [];
