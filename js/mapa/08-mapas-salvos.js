@@ -475,7 +475,7 @@ async function openMapsPanel() {
 // ---------- arrastar e soltar no mapa: assets, magias, meus tokens e imagens do computador ----------
 let dragPayload = null,
   dropPrev = null;
-const DND_SEL = "[data-as],[data-my],[data-sp],[data-mt]";
+const DND_SEL = "[data-as],[data-my],[data-sp],[data-mt],[data-bst]";
 document.addEventListener(
   "mousedown",
   e => {
@@ -495,7 +495,9 @@ document.addEventListener("dragstart", e => {
         ? { k: "my", i: +d.my }
         : d.sp != null
           ? { k: "sp", i: +d.sp }
-          : { k: "mt", i: +d.mt };
+          : d.bst != null
+            ? { k: "bst", id: d.bst }
+            : { k: "mt", i: +d.mt };
   e.dataTransfer.setData("text/mesa-drop", JSON.stringify(dragPayload));
   e.dataTransfer.effectAllowed = "copy";
   const im = el.querySelector("img");
@@ -585,6 +587,7 @@ cv.addEventListener("drop", async e => {
     return;
   }
   if (!isGM) return;
+  if (p.k === "bst") return bstPlace(bstAll().find(m => m.id === p.id), wx, wy, 1);
   if (p.k === "as") addProp(ASSETS[p.i]);
   else if (p.k === "my") {
     const a = myAssets[p.i];

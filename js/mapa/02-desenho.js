@@ -70,6 +70,7 @@ function selBar() {
     .join("");
   el.innerHTML = `<div class="sbrow"><b>${esc(t.n || "Token")}</b>
     ${isGM ? `<button class="btn small" data-sb="edit">✎ Editar</button>` : ""}
+    ${isGM && !isProp(t) && t.st ? `<button class="btn small" data-sb="stat" title="Status da criatura (só você vê)">📜 Ficha</button>` : ""}
     ${!isProp(t) && t.sh && shById(t.sh) ? `<button class="btn small" data-sb="sheet" title="Abrir a ficha ligada a este token">📜 Ficha</button>` : ""}
     ${
       !isProp(t)
@@ -139,6 +140,7 @@ function selBar() {
       return toast("🏃 Disparada: deslocamento dobrado neste turno.", 1800);
     }
     if (a === "sheet") return openSheet(cur.sh);
+    if (a === "stat") return openStat(cur.id);
     if (a === "cond") {
       if ($("#condPop")) {
         $("#condPop").remove();
@@ -623,6 +625,11 @@ function paintToken(t) {
       im.naturalHeight * s,
     );
     ctx.restore();
+  } else if (t.em) {
+    ctx.font = `${r * 1.15}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(t.em, t.x, t.y + r * 0.08);
   } else {
     ctx.fillStyle = "#1a130b";
     ctx.font = `700 ${r * 0.8}px "Alegreya Sans", sans-serif`;

@@ -308,11 +308,12 @@ function openXpBox() { // mestre: dá XP para um ou vários personagens (pode di
   if (box.innerHTML) { box.innerHTML = ""; return; }
   const pcs = (sheets || []).filter(s => s.o), rest = (sheets || []).filter(s => !s.o);
   box.innerHTML = `<div class="xpbox"><div class="xp-row"><label>XP <input id="xpAmt" inputmode="numeric" placeholder="ex.: 450" style="width:90px"></label>
-      <label class="chk"><input type="radio" name="xpm" value="each" checked> para cada um</label><label class="chk"><input type="radio" name="xpm" value="split"> dividir entre os marcados</label></div>
+      <label class="chk"><input type="radio" name="xpm" value="each" checked> para cada um</label><label class="chk"><input type="radio" name="xpm" value="split"> dividir entre os marcados</label>${monDefeatedXp().n ? `<button class="btn small" id="xpMon" title="Soma o XP das criaturas do Bestiário que estão com 0 de vida no mapa">＋ ${monDefeatedXp().n} derrotado${monDefeatedXp().n > 1 ? "s" : ""} (${fmtN(monDefeatedXp().xp)} XP)</button>` : ""}</div>
     <div class="xp-who">${[...pcs, ...rest].map(s => `<label class="chk"><input type="checkbox" data-xs="${esc(s.id)}" ${s.o ? "checked" : ""}> ${esc(s.n)} <small>(nível ${s.lvl || 1} · ${fmtN(s.xp || 0)} XP)</small></label>`).join("") || `<span class="hint">Nenhuma ficha ainda.</span>`}</div>
     <div class="acts"><span class="hint" id="xpPrev"></span><span class="spacer"></span><button class="btn small primary" id="xpGo">⭐ Dar XP</button></div></div>`;
   const calc = () => { const amt = Math.max(0, Math.round(+$("#xpAmt").value || 0)), ids = [...box.querySelectorAll("[data-xs]:checked")].map(x => x.dataset.xs), split = box.querySelector('[name="xpm"]:checked').value === "split", each = split && ids.length ? Math.floor(amt / ids.length) : amt; $("#xpPrev").textContent = amt && ids.length ? `${fmtN(each)} XP para cada um de ${ids.length}` : ""; return {ids, each}; };
-  box.oninput = calc; box.onchange = calc; box.onkeydown = e => e.stopPropagation();
+  box.oninput = calc; box.onchange = calc;
+  const xm = $("#xpMon"); if (xm) xm.onclick = () => { $("#xpAmt").value = monDefeatedXp().xp; box.querySelector('[name="xpm"][value="split"]').checked = true; calc(); }; box.onkeydown = e => e.stopPropagation();
   $("#xpGo").onclick = () => {
     const {ids, each} = calc(); if (!each || !ids.length) return toast("Coloque quanto XP e marque quem ganha.");
     const ups = [];

@@ -25,6 +25,7 @@ function iniMod(t) {
   // bônus de iniciativa: da ficha ligada, ou da barra "Ini"/"Inic" se existir
   const sh = t?.sh && shById(t.sh);
   if (sh) return amod(sh, "des") + (+sh.ib || 0);
+  if (t?.st?.at) return mod5(t.st.at[1]);
   const b = (t?.b || []).find(x => /^ini/i.test(x.n || ""));
   return b ? +b.v || 0 : 0;
 }
