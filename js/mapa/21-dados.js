@@ -134,7 +134,8 @@ function hbEditor(i) {
   }
   const draw = () => {
     el.innerHTML = `<div class="hbe-top"><span class="hbs full big" style="--hc:${esc(p.c)}"><span class="hbe">${esc(p.e || "🎲")}</span><span class="hbn">${esc(p.n || "…")}</span></span>
-        <div class="hbe-f"><input id="hbN" maxlength="24" autocomplete="off" placeholder="Nome (ex.: Ataque furioso)" value="${esc(p.n)}"><input id="hbF" class="hbf" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Fórmula (ex.: 1d20+5)" value="${esc(p.f)}"><div class="dm-err" id="hbErr"></div></div></div>
+        <div class="hbe-f"><input id="hbN" maxlength="24" autocomplete="off" placeholder="Nome (ex.: Ataque furioso)" value="${esc(p.n)}"><input id="hbF" class="hbf" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Fórmula (ex.: 1d20+5)" value="${esc(p.f)}"><input id="hbF2" class="hbf" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Dano depois (opcional, ex.: 1d8+3)" value="${esc(p.f2 || "")}" title="Se preencher, rola o dano logo depois do acerto (dobra os dados no 20 natural)"><div class="dm-err" id="hbErr"></div></div></div>
+      <button class="btn hbl-open" id="hbLibBtn">📚 Escolher um pronto: armas, magias, testes, ataques da minha ficha…</button>
       <div class="lbl">Emoji</div><div class="hbe-emo">${HB_EMOJI.map(x => `<button data-he="${x}" aria-pressed="${p.e === x}">${x}</button>`).join("")}<input id="hbEc" maxlength="4" placeholder="outro" value="${HB_EMOJI.includes(p.e) ? "" : esc(p.e || "")}" title="Cole qualquer emoji"></div>
       <div class="lbl">Cor</div><div class="hbe-col">${HB_COLORS.map(c => `<button data-hc="${c}" style="background:${c}" aria-pressed="${p.c === c}" aria-label="Cor ${c}"></button>`).join("")}<input type="color" id="hbCc" value="${esc(p.c)}" title="Outra cor"></div>
       <div class="acts foot">${isNew ? "" : `<button class="btn small danger" id="hbDel">Remover</button>`}<button class="btn small" id="hbTry">🎲 Testar</button><span class="spacer"></span><button class="btn small" id="hbX">Cancelar</button><button class="btn small primary" id="hbOk">Salvar</button></div>`;
@@ -147,6 +148,11 @@ function hbEditor(i) {
       p.f = e.target.value;
       q("#hbErr").textContent = "";
     };
+    q("#hbF2").oninput = e => {
+      p.f2 = e.target.value;
+      q("#hbErr").textContent = "";
+    };
+    q("#hbLibBtn").onclick = () => hbLib(el, p, () => { el.onclick = el.onchange = el.onkeydown = null; draw(); });
     el.querySelectorAll("input").forEach(
       x =>
         (x.onkeydown = e => {
@@ -182,6 +188,7 @@ function hbEditor(i) {
     const ok = () => {
       try {
         parseFormula(p.f);
+        if (p.f2 && p.f2.trim()) parseFormula(p.f2);
         return true;
       } catch (err) {
         q("#hbErr").textContent = "Fórmula: " + err.message;
@@ -189,12 +196,12 @@ function hbEditor(i) {
       }
     };
     q("#hbTry").onclick = () => {
-      if (ok()) doRoll(p.f, 0, p.n || "Atalho", false);
+      if (ok()) hbRoll({ ...p, n: p.n || "Atalho" });
     };
     q("#hbX").onclick = () => el.remove();
     q("#hbOk").onclick = () => {
       if (!ok()) return;
-      hotbar[i] = { n: (p.n || "Rolagem").slice(0, 24), f: p.f.replace(/\s+/g, ""), c: p.c, e: p.e || "🎲" };
+      hotbar[i] = { n: (p.n || "Rolagem").slice(0, 24), f: p.f.replace(/\s+/g, ""), f2: (p.f2 || "").replace(/\s+/g, ""), c: p.c, e: p.e || "🎲", d: p.d || "" };
       saveHotbar();
       drawDiceBar();
       el.remove();
@@ -629,7 +636,7 @@ function drawDiceBar() {
     if (!b) return;
     const i = +b.dataset.hs,
       p = hotbar[i];
-    if (p) doRoll(p.f, 0, p.n, false);
+    if (p) hbRoll(p);
     else hbEditor(i);
   };
   hb.oncontextmenu = e => {
@@ -1035,4 +1042,5 @@ function doRoll(formula, adv = 0, label = "", secret = false, snd = null) {
   };
   if (!r.secret) send("roll", r);
   addRoll(r, true);
+  return r;
 }
