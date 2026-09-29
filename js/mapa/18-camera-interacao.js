@@ -71,6 +71,16 @@ cv.addEventListener("pointerdown", e => {
     return;
   }
   if (e.button === 0) lastClick = [wx, wy];
+  if (e.button === 0 && isGM && panelKind === "snd" && !spaceDown) {
+    const h = zoneHandleAt(wx, wy);
+    if (h) {
+      zoneSel = h.z.id;
+      drag = { kind: "zone", z: h.z, mode: h.mode, ox: wx - h.z.x, oy: wy - h.z.y, moved: false };
+      document.querySelectorAll(".snd-z").forEach((r, i) => r.classList.toggle("on", scene.snd.z[i] === h.z));
+      dirty = true;
+      return;
+    }
+  }
   if (e.button === 0 && isGM && zonePlace) {
     zonePlaceAt(wx, wy);
     return;
@@ -545,6 +555,13 @@ cv.addEventListener("pointermove", e => {
     dirty = true;
     return;
   }
+  if (drag.kind === "zone") {
+    const z = drag.z;
+    if (drag.mode === "move") { z.x = Math.round(wx - drag.ox); z.y = Math.round(wy - drag.oy); }
+    else z.r = Math.max(1, Math.min(60, Math.round((Math.hypot(wx - z.x, wy - z.y) / G().size) * 2) / 2));
+    drag.moved = true; zoneT = 0; dirty = true;
+    return;
+  }
   if (drag.kind === "wallcircle") {
     drag.r = Math.hypot(wx - drag.c[0], wy - drag.c[1]);
     dirty = true;
@@ -756,6 +773,10 @@ function endPointer(e) {
       3200,
     );
     dirty = true;
+    return;
+  }
+  if (d.kind === "zone") {
+    if (d.moved) { save("scene"); if (d.mode === "size") toast(`Raio: ${String(d.z.r).replace(".", ",")} casas`, 1000); }
     return;
   }
   if (d.kind === "wallcircle") {

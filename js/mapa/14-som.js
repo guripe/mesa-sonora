@@ -9,7 +9,7 @@ let sndReloadT = null,
   zoneT = 0,
   zonePlace = null,
   cbtPrev;
-const SND = () => scene.snd || (scene.snd = { m: "", a: [], auto: true, c: "", z: [] });
+const SND = () => scene.snd || (scene.snd = { bg: null, z: [] });
 const sndById = id => (sndList || []).find(s => s.id === id);
 const sndName = s => (s ? (s.emoji ? s.emoji + " " : "") + s.name : "?");
 async function sndLoad() {
@@ -50,25 +50,22 @@ function sndSfx(sid) {
   sndChan?.send({ type: "broadcast", event: "sfx", payload: { sid, vol: s.volume ?? 1 } });
 }
 async function sndApplyMap() {
-  // abriu um mapa salvo: toca a trilha dele
+  // abriu um mapa: toca o som de fundo dele (as regiões ligam sozinhas)
   const S = scene.snd;
-  if (!S?.auto || (!S.m && !S.a?.length)) return;
+  if (S && !S.bg && S.m) S.bg = { s: S.m, v: 0.8 }; // mapas antigos
+  if (!S?.bg?.s) return;
   if (!sndList) await sndLoad();
-  const amb = {};
-  for (const sid of S.a || [])
-    if (sndById(sid)) amb[sid] = { at: Date.now(), vol: sndById(sid).volume ?? 0.7 };
-  const m =
-    S.m && sndById(S.m)
-      ? liveMap.music?.sid === S.m
-        ? liveMap.music
-        : { sid: S.m, at: Date.now(), vol: sndById(S.m).volume ?? 0.8 }
-      : null;
   zoneOn = {};
-  await liveSet({ music: m, amb });
-  toast(
-    `🎵 Trilha do mapa: ${[m && sndName(sndById(m.sid)), ...Object.keys(amb).map(k => sndName(sndById(k)))].filter(Boolean).join(", ")}`,
-    2600,
-  );
+  await sndApplyBg(true);
+}
+async function sndApplyBg(announce) {
+  // o som de fundo do mapa toca para todos (no lugar da música)
+  if (EDIT_ID) return;
+  if (!sndList) await sndLoad();
+  const bg = scene.snd?.bg, s = bg?.s && sndById(bg.s);
+  const music = s ? (liveMap.music?.sid === bg.s ? { ...liveMap.music, vol: +bg.v || 0.8 } : { sid: bg.s, at: Date.now(), vol: +bg.v || 0.8 }) : null;
+  await liveSet({ music, amb: announce ? {} : liveMap.amb });
+  if (announce && s) toast(`🎵 Som de fundo: ${sndName(s)}`, 2200);
 }
 async function sndCombat(start) {
   // começou/acabou o combate: troca a música
@@ -124,7 +121,7 @@ function zoneTick() {
     let d = Infinity;
     for (const t of pcs) d = Math.min(d, Math.hypot(t.x - z.x, t.y - z.y));
     if (d <= R) {
-      const base = sndById(z.s).volume ?? 0.7,
+      const base = z.v ?? sndById(z.s).volume ?? 0.7,
         v = Math.round(base * (1 - (0.6 * d) / R) * 20) / 20;
       want[z.s] = Math.max(want[z.s] || 0, v);
     }
@@ -151,180 +148,70 @@ function zoneTick() {
   if (ch) liveSet({ ...liveMap, amb });
 }
 function paintZones() {
-  // só o mestre vê as zonas
+  // só o mestre vê as regiões; com o painel Som aberto aparecem as alças (mover e tamanho)
   const Z = scene.snd?.z;
   if (!isGM || !Z?.length) return;
+  const edit = panelKind === "snd";
   ctx.save();
   for (const z of Z) {
-    const R = (+z.r || 4) * G().size,
-      on = z.s && zoneOn[z.s];
+    const R = (+z.r || 4) * G().size, on = z.s && zoneOn[z.s], sel = edit && zoneSel === z.id;
     ctx.beginPath();
     ctx.arc(z.x, z.y, R, 0, Math.PI * 2);
-    ctx.fillStyle = on ? "rgba(95,190,160,.08)" : "rgba(95,160,190,.05)";
+    ctx.fillStyle = sel ? "rgba(255,215,106,.10)" : on ? "rgba(95,190,160,.08)" : "rgba(95,160,190,.05)";
     ctx.fill();
     ctx.setLineDash([10 / cam.z, 8 / cam.z]);
-    ctx.lineWidth = 2 / cam.z;
-    ctx.strokeStyle = on ? "rgba(120,220,180,.8)" : "rgba(120,180,220,.55)";
+    ctx.lineWidth = (sel ? 3 : 2) / cam.z;
+    ctx.strokeStyle = sel ? "#ffd76a" : on ? "rgba(120,220,180,.8)" : "rgba(120,180,220,.55)";
     ctx.stroke();
     ctx.setLineDash([]);
-    label(z.x, z.y, `🔊 ${z.s ? sndName(sndById(z.s)) : "escolha o som"}`);
+    label(z.x, z.y - (edit ? 18 / cam.z : 0), `🔊 ${z.s ? sndName(sndById(z.s)) : "escolha o som"} · ${Math.round((z.v ?? 0.7) * 100)}%`);
+    if (edit) {
+      for (const [hx, hy, big] of [[z.x, z.y, 1], [z.x + R, z.y, 0]]) {
+        ctx.beginPath(); ctx.arc(hx, hy, (big ? 8 : 7) / cam.z, 0, Math.PI * 2);
+        ctx.fillStyle = big ? "#ffd76a" : "#7fb2e8"; ctx.fill(); ctx.lineWidth = 1.5 / cam.z; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.stroke();
+      }
+    }
   }
   ctx.restore();
 }
-async function openSndPanel() {
-  panelKind = "snd";
-  if (!sndList) {
-    $("#panel").innerHTML =
-      `<div class="panel"><h3>Som <button class="btn small" id="pClose">Fechar</button></h3><p class="hint">Carregando os sons…</p></div>`;
-    $("#pClose").onclick = closePanel;
-    await sndLoad();
-    if (panelKind !== "snd") return;
-  }
-  const S = SND(),
-    mus = sndList.filter(s => s.kind === "music"),
-    amb = sndList.filter(s => s.kind === "ambient"),
-    sfx = sndList.filter(s => s.kind === "sfx");
-  const opt = (L, v, none = "— nenhuma —") =>
-    `<option value="">${none}</option>` +
-    L.map(
-      s => `<option value="${esc(s.id)}" ${s.id === v ? "selected" : ""}>${esc(sndName(s))}</option>`,
-    ).join("");
-  let cbtG = "";
-  try {
-    cbtG = localStorage.getItem("mesa.cbtsnd") || "";
-  } catch {}
-  $("#panel").innerHTML =
-    `<div class="panel snd-panel" role="dialog" aria-label="Som"><h3>🎵 Som da mesa<button class="btn small" id="pClose">Fechar</button></h3>
-    <p class="hint" style="margin-top:0">Toca para todos que estão no mapa (botão 🔊 Som no topo liga/desliga e muda o volume de cada um) e também na página da Mesa Sonora.</p>
-    <div class="lbl">Tocando agora</div>
-    <div class="snd-now">${liveMap.music && sndById(liveMap.music.sid) ? `<span class="snd-chip on">🎵 ${esc(sndName(sndById(liveMap.music.sid)))}<button data-stopm title="Parar">■</button></span>` : `<span class="hint">sem música</span>`}
-      ${Object.keys(liveMap.amb || {})
-        .filter(sndById)
-        .map(
-          k =>
-            `<span class="snd-chip on">${zoneOn[k] ? "📍" : "🌧"} ${esc(sndName(sndById(k)))}<button data-stopa="${esc(k)}" title="Parar">■</button></span>`,
-        )
-        .join("")}
-      ${liveMap.music || Object.keys(liveMap.amb || {}).length ? `<button class="btn small danger" id="sStopAll">Parar tudo</button>` : ""}</div>
-    <div class="lbl">Tocar</div>
-    <div class="snd-grid">${mus.map(s => `<button class="snd-b ${liveMap.music?.sid === s.id ? "on" : ""}" data-pm="${esc(s.id)}" title="Música (troca a que está tocando)">🎵 ${esc(s.emoji || "")} ${esc(s.name)}</button>`).join("")}
-      ${amb.map(s => `<button class="snd-b amb ${liveMap.amb?.[s.id] ? "on" : ""}" data-pa="${esc(s.id)}" title="Ambiente (liga/desliga, soma com os outros)">🌧 ${esc(s.emoji || "")} ${esc(s.name)}</button>`).join("")}
-      ${sfx.map(s => `<button class="snd-b sfx" data-px="${esc(s.id)}" title="Efeito (toca uma vez para todos)">💥 ${esc(s.emoji || "")} ${esc(s.name)}</button>`).join("") || ""}
-      ${!sndList.length ? `<p class="hint">Nenhum som ainda. Suba músicas e ambientes na página da Mesa Sonora.</p>` : ""}</div>
-    <div class="lbl">Trilha deste mapa ${scene.libName ? `<small>(${esc(scene.libName)})</small>` : ""}</div>
-    <label class="snd-f">Música <select id="sM">${opt(mus, S.m)}</select></label>
-    <div class="snd-f">Ambientes <div class="snd-amb">${amb.map(s => `<label class="chk"><input type="checkbox" data-sa="${esc(s.id)}" ${(S.a || []).includes(s.id) ? "checked" : ""}> ${esc(sndName(s))}</label>`).join("") || `<span class="hint">nenhum</span>`}</div></div>
-    <div class="acts"><label class="chk"><input type="checkbox" id="sAuto" ${S.auto !== false ? "checked" : ""}> Tocar sozinho ao abrir este mapa</label><span class="spacer"></span><button class="btn small primary" id="sPlayMap">▶ Tocar a trilha</button></div>
-    <div class="lbl">Combate</div>
-    <label class="snd-f">Música de combate <select id="sC">${opt(mus, S.c, "— a padrão —")}</select></label>
-    <label class="snd-f">Padrão (todos os mapas) <select id="sCG">${opt(mus, cbtG)}</select></label>
-    <p class="hint">Entra sozinha no “Começar combate” e, no “Encerrar combate”, volta a música que estava antes.</p>
-    <div class="lbl">Zonas de som <small>o ambiente liga quando um personagem de jogador chega perto (mais alto no centro)</small></div>
-    <div class="snd-zones">${(S.z || []).map((z, i) => `<div class="snd-z"><select data-zs="${i}">${opt(amb, z.s, "— escolha —")}</select><label class="mini">raio <input data-zr="${i}" value="${esc(z.r)}" inputmode="numeric" style="width:40px"> casas</label><button class="btn small ic" data-zgo="${i}" title="Mostrar no mapa">👁</button><button class="btn small ic" data-zmv="${i}" title="Mudar de lugar: clique no mapa">📍</button><button class="btn small ic danger" data-zdel="${i}" title="Apagar">✕</button></div>`).join("") || `<p class="hint" style="margin:0">Nenhuma. Ex.: cachoeira, fogueira, taverna, ninho de morcegos.</p>`}</div>
-    <div class="acts"><button class="btn small" id="sZoneAdd">＋ Zona de som (clique no mapa)</button></div></div>`;
-  const P = $("#panel");
-  $("#pClose").onclick = closePanel;
-  const sv = () => {
-    save("scene", "merge");
-    dirty = true;
-  };
-  $("#sM").onchange = e => {
-    S.m = e.target.value;
-    sv();
-  };
-  $("#sC").onchange = e => {
-    S.c = e.target.value;
-    sv();
-  };
-  $("#sCG").onchange = e => {
-    try {
-      localStorage.setItem("mesa.cbtsnd", e.target.value);
-    } catch {}
-  };
-  $("#sAuto").onchange = e => {
-    S.auto = e.target.checked;
-    sv();
-  };
-  $("#sPlayMap").onclick = () => {
-    if (!S.m && !S.a?.length) return toast("Escolha a música ou os ambientes deste mapa primeiro.");
-    const a = S.auto;
-    S.auto = true;
-    sndApplyMap();
-    S.auto = a;
-  };
-  const sa = $("#sStopAll");
-  if (sa)
-    sa.onclick = () => {
-      zoneOn = {};
-      MA.stopSfx();
-      sndChan?.send({ type: "broadcast", event: "hush", payload: {} });
-      liveSet({ music: null, amb: {} });
-    };
-  $("#sZoneAdd").onclick = () => {
-    zonePlace = { add: true };
-    toast("Clique no mapa onde fica o som (Esc cancela).", 2600);
-  };
-  P.onchange = e => {
-    const d = e.target.dataset;
-    if (d.sa) {
-      S.a = (S.a || []).filter(x => x !== d.sa);
-      if (e.target.checked) S.a.push(d.sa);
-      sv();
-    }
-    if (d.zs != null) {
-      S.z[+d.zs].s = e.target.value;
-      sv();
-    }
-    if (d.zr != null) {
-      S.z[+d.zr].r = Math.max(1, Math.min(40, +e.target.value || 4));
-      sv();
-    }
-  };
-  P.onkeydown = e => e.stopPropagation();
-  P.onclick = e => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    const d = b.dataset;
-    if (d.pm) sndMusic(liveMap.music?.sid === d.pm ? "" : d.pm);
-    else if (d.pa) sndAmb(d.pa, !liveMap.amb?.[d.pa]);
-    else if (d.px) {
-      sndSfx(d.px);
-      b.classList.add("on");
-      setTimeout(() => b.classList.remove("on"), 400);
-    } else if (d.stopm != null) sndMusic("");
-    else if (d.stopa) {
-      delete zoneOn[d.stopa];
-      sndAmb(d.stopa, false);
-    } else if (d.zgo != null) {
-      const z = S.z[+d.zgo];
-      centerOn(z.x, z.y, Math.max(cam.z, 0.5));
-    } else if (d.zmv != null) {
-      zonePlace = { i: +d.zmv };
-      toast("Clique no mapa no novo lugar do som.", 2400);
-    } else if (d.zdel != null) {
-      const z = S.z.splice(+d.zdel, 1)[0];
-      if (z?.s && zoneOn[z.s]) {
-        delete zoneOn[z.s];
-        sndAmb(z.s, false);
-      }
-      sv();
-      openSndPanel();
-    }
-  };
+// ---- painel Som: só as regiões de som (arrastar para criar, mover e mudar o tamanho no mapa) ----
+let zoneSel = null;
+function zoneHandleAt(wx, wy) { // alça de uma região: centro (mover) ou borda (tamanho)
+  const Z = scene.snd?.z || [], tol = 12 / cam.z;
+  for (let i = Z.length - 1; i >= 0; i--) { const z = Z[i], R = (+z.r || 4) * G().size;
+    if (Math.hypot(wx - z.x, wy - z.y) <= tol) return { z, mode: "move" };
+    if (Math.hypot(wx - (z.x + R), wy - z.y) <= tol || Math.abs(Math.hypot(wx - z.x, wy - z.y) - R) <= tol * 0.7) return { z, mode: "size" }; }
+  return null;
 }
-function zonePlaceAt(wx, wy) {
-  // clique no mapa colocando/movendo uma zona
-  const S = SND();
-  S.z = S.z || [];
-  if (zonePlace.add) {
-    const amb = (sndList || []).filter(s => s.kind === "ambient");
-    S.z.push({ id: uid(), x: Math.round(wx), y: Math.round(wy), r: 4, s: amb[0]?.id || "" });
-  } else if (S.z[zonePlace.i]) {
-    S.z[zonePlace.i].x = Math.round(wx);
-    S.z[zonePlace.i].y = Math.round(wy);
-  }
-  zonePlace = null;
-  save("scene");
-  dirty = true;
+function zoneAdd(sid, wx, wy) {
+  const S = SND(); S.z = S.z || [];
+  const s = sndById(sid), z = { id: uid(), x: Math.round(wx), y: Math.round(wy), r: 4, s: sid || "", v: s?.volume ?? 0.7 };
+  S.z.push(z); zoneSel = z.id; save("scene"); dirty = true;
   if (panelKind === "snd") openSndPanel();
+  toast(`🔊 Região criada. Arraste o ponto amarelo para mover e o azul para mudar o tamanho.`, 3000);
 }
+async function openSndPanel() {
+  panelKind = "snd"; dirty = true;
+  if (!sndList) { $("#panel").innerHTML = `<div class="panel"><h3>Sons por região <button class="btn small" id="pClose">Fechar</button></h3><p class="hint">Carregando os sons…</p></div>`; $("#pClose").onclick = closePanel; await sndLoad(); if (panelKind !== "snd") return; }
+  const S = SND(), list = sndList.filter(s => s.kind !== "sfx"), Z = S.z || [];
+  const opt = v => `<option value="">— escolha —</option>` + list.map(s => `<option value="${esc(s.id)}" ${s.id === v ? "selected" : ""}>${esc(sndName(s))}</option>`).join("");
+  $("#panel").innerHTML = `<div class="panel snd-panel" role="dialog" aria-label="Sons por região"><h3>🔊 Sons por região<button class="btn small" id="pClose">Fechar</button></h3>
+    <p class="hint" style="margin-top:0"><b>Arraste um som para o mapa</b> para criar uma região. O som liga quando um personagem entra nela e fica mais alto perto do centro. No mapa: ponto <b style="color:#ffd76a">amarelo</b> move, ponto <b style="color:#7fb2e8">azul</b> muda o tamanho.</p>
+    <div class="snd-grid">${list.map(s => `<span class="snd-b" data-szs="${esc(s.id)}" draggable="true" title="Arraste para o mapa">${esc(sndName(s))}</span>`).join("") || `<p class="hint">Nenhum som ainda. Suba ambientes e músicas na página da Mesa Sonora.</p>`}</div>
+    <div class="lbl">Regiões deste mapa</div>
+    <div class="snd-zones">${Z.map((z, i) => `<div class="snd-z ${zoneSel === z.id ? "on" : ""}" data-zi="${i}"><select data-zs="${i}">${opt(z.s)}</select>
+        <label class="snd-vol" title="Volume desta região">🔈<input type="range" min="0" max="1" step="0.05" data-zv="${i}" value="${z.v ?? 0.7}"><b>${Math.round((z.v ?? 0.7) * 100)}%</b></label>
+        <button class="btn small ic" data-zgo="${i}" title="Mostrar no mapa">👁</button><button class="btn small ic danger" data-zdel="${i}" title="Apagar">✕</button></div>`).join("") || `<p class="hint" style="margin:0">Nenhuma ainda. Ex.: cachoeira, fogueira, taverna, ninho de morcegos.</p>`}</div>
+    <p class="hint">O som de fundo do mapa inteiro fica em ⚙ Mapa e grid.</p></div>`;
+  const P = $("#panel"); $("#pClose").onclick = () => { closePanel(); dirty = true; };
+  const sv = () => { save("scene", "merge"); dirty = true; };
+  P.onkeydown = e => e.stopPropagation();
+  P.oninput = e => { const d = e.target.dataset; if (d.zv != null) { const z = Z[+d.zv]; z.v = +e.target.value; e.target.nextElementSibling.textContent = Math.round(z.v * 100) + "%"; zoneT = 0; sv(); } };
+  P.onchange = e => { const d = e.target.dataset; if (d.zs != null) { const z = Z[+d.zs]; if (z.s && zoneOn[z.s]) { delete zoneOn[z.s]; sndAmb(z.s, false); } z.s = e.target.value; zoneT = 0; sv(); } };
+  P.onclick = e => { const b = e.target.closest("button,[data-zi]"); if (!b) return; const d = b.dataset;
+    if (d.zgo != null) { const z = Z[+d.zgo]; zoneSel = z.id; centerOn(z.x, z.y, Math.max(cam.z, 0.5)); return openSndPanel(); }
+    if (d.zdel != null) { const z = Z.splice(+d.zdel, 1)[0]; if (z?.s && zoneOn[z.s] && !Z.some(o => o.s === z.s)) { delete zoneOn[z.s]; sndAmb(z.s, false); } sv(); return openSndPanel(); }
+    if (d.zi != null && e.target.closest("select,input")) return;
+    if (d.zi != null) { zoneSel = Z[+d.zi]?.id; dirty = true; P.querySelectorAll(".snd-z").forEach(r => r.classList.toggle("on", r === b)); } };
+}
+function zonePlaceAt(wx, wy) { zonePlace = null; zoneAdd((sndList || []).find(s => s.kind === "ambient")?.id || "", wx, wy); }

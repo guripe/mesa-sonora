@@ -41,7 +41,7 @@ function drawTools() {
         btn("erase", I.erase, "Borracha (apaga desenhos)", "e") +
         btn("fog", I.fog, "Névoa de guerra", "f") +
         btn("wall", I.wall, "Paredes e portas (bloqueiam luz e visão)", "w") +
-        `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="iniBtn" title="Iniciativa e turnos" aria-label="Iniciativa">${I.swords}</button><button class="tool" id="sheetsBtn" title="Fichas de personagem" aria-label="Fichas">${I.sheet}</button><button class="tool" id="shopBtn" title="Mercado: monte lojas para os jogadores comprarem" aria-label="Mercado">${I.shop}</button><button class="tool" id="bstBtn" title="Bestiário: criaturas prontas do D&D (animais, pessoas, monstros…)" aria-label="Bestiário">${I.beast}</button><button class="tool" id="sndBtn" title="Som: trilha do mapa, música de combate e zonas de som" aria-label="Som">${I.music}</button><button class="tool" id="handBtn" title="Anotações, mapas e imagens (libere para os jogadores ou mostre na tela deles)" aria-label="Anotações">${I.notes}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>`
+        `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="iniBtn" title="Iniciativa e turnos" aria-label="Iniciativa">${I.swords}</button><button class="tool" id="sheetsBtn" title="Fichas de personagem" aria-label="Fichas">${I.sheet}</button><button class="tool" id="shopBtn" title="Mercado: monte lojas para os jogadores comprarem" aria-label="Mercado">${I.shop}</button><button class="tool" id="bstBtn" title="Bestiário: criaturas prontas do D&D (animais, pessoas, monstros…)" aria-label="Bestiário">${I.beast}</button><button class="tool" id="sndBtn" title="Sons por região: arraste um som para o mapa" aria-label="Sons por região">${I.music}</button><button class="tool" id="handBtn" title="Anotações, mapas e imagens (libere para os jogadores ou mostre na tela deles)" aria-label="Anotações">${I.notes}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>`
       : "");
   $("#tools").onclick = e => {
     const b = e.target.closest("button");
@@ -423,6 +423,10 @@ function openScenePanel(refresh) {
   const keep = document.activeElement?.id;
   $("#panel").innerHTML =
     `<div class="panel" role="dialog" aria-label="Mapa e grid"><h3>Mapa e grid <button class="btn small" id="pClose">Fechar</button></h3>
+    <label for="bgSnd">🎵 Som de fundo do mapa</label>
+    ${!sndList ? `<p class="hint" style="margin:0">Carregando os sons…</p>` : `<div class="bgsnd"><select id="bgSnd"><option value="">— sem som —</option>${sndList.filter(s => s.kind !== "sfx").map(s => `<option value="${esc(s.id)}" ${scene.snd?.bg?.s === s.id ? "selected" : ""}>${esc(sndName(s))}</option>`).join("")}</select>
+      ${scene.snd?.bg?.s ? `<label class="snd-vol" title="Volume do som de fundo">🔈<input type="range" id="bgSndV" min="0" max="1" step="0.05" value="${scene.snd.bg.v ?? 0.8}"><b>${Math.round((scene.snd.bg.v ?? 0.8) * 100)}%</b></label>` : ""}</div>
+      <p class="hint" style="margin:2px 0 10px">Toca para todos enquanto este mapa estiver aberto (e volta sozinho quando você abrir o mapa salvo).</p>`}
     <label for="bgUrl">Imagem do mapa (link)</label>
     <div style="display:flex;gap:6px"><input type="url" id="bgUrl" placeholder="https://… .jpg / .png" value="${esc(scene.bg || "")}"><button class="btn small primary" id="bgSet">Usar</button></div>
     <div class="acts" style="margin-top:8px"><label class="btn small" style="margin:0;color:var(--ink)">Enviar arquivo…<input type="file" id="bgFile" accept="image/*" hidden></label>${scene.bg ? `<button class="btn small danger" id="bgDel">Tirar imagem</button>` : ""}</div>
@@ -460,6 +464,11 @@ function openScenePanel(refresh) {
     ${fog.on && Object.keys(fog.cells).length && fog.sig && fog.sig !== fogSig() ? `<p class="hint" style="color:#e0a08e;margin-top:10px">A grid mudou depois de você revelar a névoa, então as áreas reveladas podem ter saído do lugar.</p>` : ""}
   </div>`;
   $("#pClose").onclick = closePanel;
+  if (!sndList && !openScenePanel.sl) { openScenePanel.sl = 1; sndLoad().then(() => openScenePanel(true)); }
+  const bs = $("#bgSnd");
+  if (bs) bs.onchange = () => { const S = SND(); S.bg = bs.value ? { s: bs.value, v: S.bg?.v ?? sndById(bs.value)?.volume ?? 0.8 } : null; save("scene"); sndApplyBg(); openScenePanel(true); };
+  const bv = $("#bgSndV");
+  if (bv) { let t = null; bv.oninput = () => { SND().bg.v = +bv.value; bv.nextElementSibling.textContent = Math.round(bv.value * 100) + "%"; clearTimeout(t); t = setTimeout(() => { save("scene", "merge"); sndApplyBg(); }, 300); }; }
   $("#bgSet").onclick = () => {
     const u = $("#bgUrl").value.trim();
     if (u) setBackground(u);

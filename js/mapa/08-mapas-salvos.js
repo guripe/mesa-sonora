@@ -475,7 +475,7 @@ async function openMapsPanel() {
 // ---------- arrastar e soltar no mapa: assets, magias, meus tokens e imagens do computador ----------
 let dragPayload = null,
   dropPrev = null;
-const DND_SEL = "[data-as],[data-my],[data-sp],[data-mt],[data-bst]";
+const DND_SEL = "[data-as],[data-my],[data-sp],[data-mt],[data-bst],[data-szs]";
 document.addEventListener(
   "mousedown",
   e => {
@@ -497,6 +497,8 @@ document.addEventListener("dragstart", e => {
           ? { k: "sp", i: +d.sp }
           : d.bst != null
             ? { k: "bst", id: d.bst }
+            : d.szs != null
+              ? { k: "sz", sid: d.szs }
             : { k: "mt", i: +d.mt };
   e.dataTransfer.setData("text/mesa-drop", JSON.stringify(dragPayload));
   e.dataTransfer.effectAllowed = "copy";
@@ -587,6 +589,7 @@ cv.addEventListener("drop", async e => {
     return;
   }
   if (!isGM) return;
+  if (p.k === "sz") return zoneAdd(p.sid, wx, wy);
   if (p.k === "bst") return bstPlace(bstAll().find(m => m.id === p.id), wx, wy, 1);
   if (p.k === "as") addProp(ASSETS[p.i]);
   else if (p.k === "my") {
@@ -609,6 +612,13 @@ function paintDropPrev() {
   const p = d.p;
   ctx.save();
   ctx.globalAlpha = 0.6;
+  if (p?.k === "sz") {
+    ctx.beginPath(); ctx.arc(d.x, d.y, 4 * G().size, 0, Math.PI * 2); ctx.fillStyle = "rgba(95,190,160,.15)"; ctx.fill();
+    ctx.setLineDash([10 / cam.z, 8 / cam.z]); ctx.lineWidth = 2 / cam.z; ctx.strokeStyle = "rgba(120,220,180,.9)"; ctx.stroke(); ctx.setLineDash([]);
+    label(d.x, d.y, "🔊 " + sndName(sndById(p.sid)));
+    ctx.restore();
+    return;
+  }
   if (!p) {
     const S = G().size;
     ctx.setLineDash([6 / cam.z, 4 / cam.z]);
