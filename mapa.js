@@ -34,6 +34,8 @@ I.maps = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-widt
 I.notes = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2M9 8h6M9 12h6M9 16h4"/></svg>';
 I.swords = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 17.5 3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2M9.5 17.5 21 6V3h-3L6.5 14.5M11 19l-6-6M8 16l-4 4M5 21l-2-2"/></svg>';
 I.door = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 21V4l10-1v18"/><path d="M3 21h18"/><circle cx="12" cy="12" r="1"/></svg>';
+I.sheet = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M7 3h10l3 3v15H7a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z"/><circle cx="12" cy="10" r="2.5"/><path d="M8.5 17c.8-2 2-3 3.5-3s2.7 1 3.5 3"/></svg>';
+I.music = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
 const COLORS = ["#d0a54c", "#c0473a", "#4a72b8", "#5f9a4a", "#8a5bb0", "#e07b2e", "#e8e2d0", "#222222"];
 
 // ---------- estado ----------
@@ -127,10 +129,11 @@ function getImg(url){
 let selBarKey = "";
 function selBar(){
   const t = tokens.find(x => x.id === selTok), can = t && (isGM || owns(t));
-  const key = can ? [t.id, t.n, t.h, isGM, JSON.stringify(t.b || []), (t.tr || []).length, t.pw, t.ph].join("|") : "";
+  const key = can ? [t.id, t.n, t.h, isGM, JSON.stringify(t.b || []), (t.tr || []).length, t.pw, t.ph, JSON.stringify(t.cd || []), t.mt, t.dash, t.sh, scene.init?.on, scene.init?.cur].join("|") : "";
   if (key === selBarKey) return; selBarKey = key;
   let el = $("#selbar"); if (!el) { el = document.createElement("div"); el.id = "selbar"; el.className = "selbar"; document.body.appendChild(el); }
-  if (!can) { el.hidden = true; return; }
+  if (!can) { el.hidden = true; $("#condPop")?.remove(); return; }
+  const cp = $("#condPop"); if (cp && cp.dataset.t !== t.id) cp.remove(); else if (cp) openCondPop(t);
   el.hidden = false;
   const bars = (t.b || []).map((b, i) => ({...b, i})).filter(b => b.v !== "" && b.v != null || (b.m !== "" && b.m != null));
   const barUI = bars.map(b => `<span class="sbbar" style="--bc:${esc(b.c || "#c0473a")}"><i></i>
@@ -139,6 +142,9 @@ function selBar(){
       <button class="btn small" data-hp="${b.i}" data-d="1">+1</button><button class="btn small" data-hp="${b.i}" data-d="10">+10</button></span>`).join("");
   el.innerHTML = `<div class="sbrow"><b>${esc(t.n || "Token")}</b>
     ${isGM ? `<button class="btn small" data-sb="edit">✎ Editar</button>` : ""}
+    ${!isProp(t) && t.sh && shById(t.sh) ? `<button class="btn small" data-sb="sheet" title="Abrir a ficha ligada a este token">📜 Ficha</button>` : ""}
+    ${!isProp(t) ? `<button class="btn small" data-sb="cond" title="Condições: envenenado, caído, atordoado…">✨ Condições${condsOf(t).length ? ` <small>${condsOf(t).map(c => condInfo(c.k)[1]).slice(0, 4).join("")}</small>` : ""}</button>` : ""}
+    ${inCombat(t) && maxCells(t) < Infinity ? `<span class="sbmove" title="Deslocamento neste turno">🥾 ${String(Math.round((+t.mt || 0) * (G().unit || 1) * 10) / 10).replace(".", ",")} / ${String(Math.round(moveBudget(t) * (G().unit || 1) * 10) / 10).replace(".", ",")} ${esc(G().unitName || "m")}</span>${!t.dash ? `<button class="btn small" data-sb="dash" title="Disparada: dobra o deslocamento neste turno">🏃 Disparada</button>` : ""}` : ""}
     <button class="btn small" data-sb="l" title="Girar (Q)" aria-label="Girar para a esquerda">↺</button><button class="btn small" data-sb="r" title="Girar (E)" aria-label="Girar para a direita">↻</button>
     ${isGM && isProp(t) ? `<button class="btn small" data-sb="smaller" title="Diminuir (ou arraste um canto)" aria-label="Diminuir">－</button><span class="sbsize">${String(t.pw || 1).replace(".", ",")}×${String(t.ph || 1).replace(".", ",")}</span><button class="btn small" data-sb="bigger" title="Aumentar (ou arraste um canto)" aria-label="Aumentar">＋</button>` : ""}
     ${isGM && !isProp(t) && t.tr?.length ? `<button class="btn small" data-sb="back" title="Volta para onde estava antes do último movimento">↶ Voltar movimento</button><button class="btn small" data-sb="trail" title="Apagar o rastro deste token">🧹 Rastro</button>` : ""}
@@ -146,7 +152,7 @@ function selBar(){
     `;
   const setHP = (i, v) => {
     const cur = tokens.find(x => x.id === selTok); if (!cur?.b?.[i]) return;
-    v = Math.round(v); cur.b[i].v = v; dirty = true; selBarKey = "";
+    v = Math.round(v); cur.b[i].v = v; dirty = true; selBarKey = ""; shFromTokenPV(cur, i);
     if (isGM) save("tokens"); else tokReq({id: cur.id, bi: i, bv: v, who: myNick});
   };
   el.querySelectorAll("[data-hpv]").forEach(inp => {
@@ -160,6 +166,9 @@ function selBar(){
     const a = b.dataset.sb;
     if (b.dataset.hp != null) { const i = +b.dataset.hp; return setHP(i, (+cur.b[i].v || 0) + +b.dataset.d); }
     if (a === "edit") return isProp(cur) ? openPropPanel(cur) : openTokenPanel(cur);
+    if (a === "dash") { if (isGM) { cur.dash = 1; save("tokens"); } else { cur.dash = 1; tokReq({id: cur.id, dash: 1, who: myNick}); } selBarKey = ""; dirty = true; reachCache.key = ""; return toast("🏃 Disparada: deslocamento dobrado neste turno.", 1800); }
+    if (a === "sheet") return openSheet(cur.sh);
+    if (a === "cond") { if ($("#condPop")) { $("#condPop").remove(); return; } openCondPop(cur); $("#condPop").dataset.t = cur.id; return; }
     if (a === "back") { const mv = cur.tr?.pop(); if (!mv) return; const [x, y] = mv[0]; cur.x = x; cur.y = y; send("tok", {id: cur.id, x, y, a: cur.a}); save("tokens"); dirty = true; selBarKey = ""; return toast("Movimento desfeito."); }
     if (a === "trail") { cur.tr = []; save("tokens"); dirty = true; selBarKey = ""; return; }
     else if (a === "l" || a === "r") rotateSel(a === "l" ? -1 : 1);
@@ -201,6 +210,7 @@ function openTokenList(){
   };
 }
 function frame(){
+  if (isGM && scene.snd?.z?.length) zoneTick();
   if (pings.length || smoothBusy || walking || speakSet.size) dirty = true;
   if (dirty) { dirty = false; paint(); selBar(); }
   requestAnimationFrame(frame);
@@ -243,6 +253,7 @@ function paint(){
     ctx.strokeStyle = g.color; ctx.globalAlpha = g.alpha; ctx.lineWidth = 1 / cam.z; ctx.stroke(); ctx.globalAlpha = 1;
   }
   // desenhos
+  paintZones();
   for (const dr of drawings) paintDrawing(dr);
   if (drag?.kind === "draw" && drag.shape) paintDrawing(drag.shape, true);
   // tokens
@@ -381,6 +392,7 @@ function paintToken(t){
   }
   if (t.h) { ctx.globalAlpha = 1; ctx.fillStyle = "#e0735e"; ctx.font = `700 ${r * .45}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText("oculto", t.x, t.y - r * .15); }
   ctx.restore();
+  paintConds(t);
 }
 
 // ---------- paredes, luz e visão ----------
@@ -538,6 +550,7 @@ function paintWalls(){
   }
   ctx.setLineDash([]);
   if (wallDraft && hoverWall) { ctx.beginPath(); ctx.moveTo(...wallDraft); ctx.lineTo(...hoverWall); ctx.lineWidth = 3 / cam.z; ctx.strokeStyle = opt.wall === "door" ? "#b07a3a" : "rgba(240,130,60,.8)"; ctx.setLineDash([8 / cam.z, 6 / cam.z]); ctx.stroke(); ctx.setLineDash([]); }
+  if (drag?.kind === "wallhide") { const {pa, pb} = hideSeg(drag); ctx.beginPath(); ctx.moveTo(...pa); ctx.lineTo(...pb); ctx.lineWidth = 8 / cam.z; ctx.strokeStyle = "rgba(184,106,224,.85)"; ctx.setLineDash([8 / cam.z, 5 / cam.z]); ctx.stroke(); ctx.setLineDash([]); }
   if (drag?.kind === "wallcircle" && drag.r > 0) { ctx.beginPath(); ctx.arc(drag.c[0], drag.c[1], drag.r, 0, Math.PI * 2); ctx.lineWidth = 3 / cam.z; ctx.strokeStyle = "rgba(240,130,60,.8)"; ctx.setLineDash([8 / cam.z, 6 / cam.z]); ctx.stroke(); ctx.setLineDash([]); }
   if (tool === "wall") for (const [x, y, kind] of wallHandles()) { ctx.beginPath(); ctx.arc(x, y, (kind === "p" ? 4.5 : 5.5) / cam.z, 0, Math.PI * 2); ctx.fillStyle = kind === "r" ? "#7fb2e8" : "#ffe28a"; ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 1 / cam.z; ctx.stroke(); }
   ctx.restore();
@@ -560,6 +573,14 @@ function snapWall(x, y, free, skip){
   for (const w of walls()) if (w.p && w !== skip) for (const [ex, ey] of [[w.p[0], w.p[1]], [w.p[2], w.p[3]]]) if (Math.hypot(ex - x, ey - y) < tol) return [ex, ey];
   if (free) return [Math.round(x), Math.round(y)];
   const v = gridVertexNear(x, y); return Math.hypot(v[0] - x, v[1] - y) < G().size * .3 ? [Math.round(v[0] * 10) / 10, Math.round(v[1] * 10) / 10] : [Math.round(x), Math.round(y)];
+}
+function hideRange(w, x, y){ // posição ao longo da parede, em casas da grid (arredondada para baixo)
+  const [x1, y1, x2, y2] = w.p, L = Math.hypot(x2 - x1, y2 - y1), cs = G().size, u = ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / (L * L);
+  return Math.max(0, Math.min(Math.ceil(L / cs - .01) - 1, Math.floor(u * L / cs)));
+}
+function hideSeg(d){ // [ini, fim] em pixels ao longo da parede
+  const [x1, y1, x2, y2] = d.w.p, L = Math.hypot(x2 - x1, y2 - y1), cs = G().size, a = Math.min(d.a, d.b) * cs, b = Math.min(L, (Math.max(d.a, d.b) + 1) * cs), P = t => [Math.round((x1 + (x2 - x1) * t / L) * 10) / 10, Math.round((y1 + (y2 - y1) * t / L) * 10) / 10];
+  return {L, a, b, pa: P(a), pb: P(b)};
 }
 function wallAt(x, y){ const tol = 8 / cam.z; let bi = -1, bd = tol; walls().forEach((w, i) => { const d = w.c ? Math.abs(Math.hypot(x - w.c[0], y - w.c[1]) - w.r) : distSeg(x, y, [w.p[0], w.p[1]], [w.p[2], w.p[3]]); if (d < bd) { bd = d; bi = i; } }); return bi; }
 function pointInPoly(x, y, poly){ let inside = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside; } return inside; }
@@ -589,11 +610,19 @@ function sees(t, x, y, ts){
 // ---------- caminho do token (movimento) ----------
 const NEI = () => G().type === "hex" ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]] : [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 const maxCells = t => { const sp = t.sp == null ? 9 : +t.sp; return sp > 0 ? Math.floor(sp / (G().unit || 1) + 1e-6) : Infinity; };
+// ---- deslocamento por turno no combate: t.mt = casas já andadas no turno, t.dash = usou Disparada ----
+const inCombat = t => !!(t && scene.init?.on && scene.init.list?.some(e => e.tk === t.id));
+const moveBudget = t => maxCells(t) * (t.dash ? 2 : 1);
+const moveLim = t => inCombat(t) ? Math.max(0, moveBudget(t) - (+t.mt || 0)) : maxCells(t);
+function moveSpent(t, cells){ // o mestre soma o que o token andou no turno e avisa se passou
+  if (!isGM || !inCombat(t) || !(cells > 0)) return; t.mt = (+t.mt || 0) + cells;
+  const B = moveBudget(t); if (B < Infinity && t.mt > B) { const u = G().unit || 1, f = v => String(Math.round(v * u * 10) / 10).replace(".", ","); toast(`⚠️ ${t.n || "Token"} passou do deslocamento: ${f(t.mt)} de ${f(B)} ${G().unitName || "m"}.`, 2600); }
+}
 function pathStep(d, target){ // estende o caminho do arraste até a casa alvo, parando em parede ou no limite
   const P = d.path, key = c => c[0] + "," + c[1];
   const idx = P.findIndex(c => c[0] === target[0] && c[1] === target[1]);
   if (idx >= 0) { P.length = idx + 1; return; }                     // voltou por onde veio
-  const lim = isGM ? Infinity : maxCells(d.t), [tx, ty] = cellCenter(...target);
+  const lim = isGM ? Infinity : moveLim(d.t), [tx, ty] = cellCenter(...target);
   for (let guard = 0; guard < 300; guard++) {
     const last = P[P.length - 1]; if (last[0] === target[0] && last[1] === target[1]) break;
     if (P.length - 1 >= lim) { d.limit = true; break; }
@@ -608,7 +637,7 @@ function pathStep(d, target){ // estende o caminho do arraste até a casa alvo, 
 // ---------- clicar para andar ----------
 let hoverCell = null, reachCache = {key: "", map: null}, walking = null;
 function reach(t){ // casas alcançáveis a partir do token (desvia de paredes; respeita o deslocamento do jogador)
-  const lim = isGM ? 60 : maxCells(t), start = cellAt(t.x, t.y);
+  const lim = isGM ? 60 : Math.min(60, moveLim(t)), start = cellAt(t.x, t.y);
   const key = [t.id, Math.round(t.x), Math.round(t.y), wallsVer, lim, G().size, G().type, FL()].join("|");
   if (reachCache.key === key) return reachCache.map;
   const map = new Map(), k0 = start.join(","); map.set(k0, {c: start, prev: null, d: 0});
@@ -653,8 +682,8 @@ function walkTo(t, P){ // anda liso pelo caminho, virando para onde vai
     const [ex, ey] = pts[pts.length - 1], [px, py] = pts[pts.length - 2];
     cur.x = ex; cur.y = ey; cur.a = Math.round((Math.atan2(ex - px, -(ey - py)) * 180 / Math.PI + 360) % 360);
     delete tokLive[cur.id]; walking = null; hoverCell = null; dirty = true;
-    if (isGM) { pushTrail(cur, centers); send("tok", {id: cur.id, x: cur.x, y: cur.y, a: cur.a}); save("tokens"); }
-    else tokReq({id: cur.id, x: cur.x, y: cur.y, a: cur.a, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]});
+    if (isGM) { pushTrail(cur, centers); moveSpent(cur, cells.length); send("tok", {id: cur.id, x: cur.x, y: cur.y, a: cur.a}); save("tokens"); }
+    else { if (inCombat(cur)) cur.mt = (+cur.mt || 0) + cells.length; selBarKey = ""; tokReq({id: cur.id, x: cur.x, y: cur.y, a: cur.a, who: myNick, path: [[ox, oy], ...centers.slice(1).map(p => p.map(v => Math.round(v * 10) / 10))]}); }
   };
   requestAnimationFrame(tick);
 }
@@ -684,7 +713,7 @@ function tsNow(){
 }
 function paintPath(d){
   const pts = d.path.map(c => cellCenter(...c)); if (pts.length < 2) return;
-  const lim = isGM ? Infinity : maxCells(d.t), steps = pts.length - 1, full = !!d.limit || steps > lim;
+  const lim = isGM ? (inCombat(d.t) ? moveLim(d.t) : Infinity) : moveLim(d.t), steps = pts.length - 1, full = !!d.limit || steps > lim;
   ctx.save(); ctx.lineCap = ctx.lineJoin = "round";
   ctx.beginPath(); for (const c of d.path) cellPath(ctx, ...c); ctx.fillStyle = full ? "rgba(224,115,94,.16)" : "rgba(255,226,138,.14)"; ctx.fill();
   ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
@@ -699,7 +728,7 @@ function validPath(t, path){ // o mestre confere o caminho que o jogador mandou
   refreshBlock();
   if (!Array.isArray(path) || path.length < 2 || path.length > 400) return false;
   if (Math.hypot(path[0][0] - t.x, path[0][1] - t.y) > G().size * .75) return false;
-  if (path.length - 1 > maxCells(t)) return false;
+  if (path.length - 1 > moveLim(t)) return false;
   for (let i = 1; i < path.length; i++) { const [a, b] = path[i - 1], [c, e] = path[i]; if (Math.hypot(c - a, e - b) > G().size * 1.5) return false; if (blockedMove(a, b, c, e)) return false; }
   return true;
 }
@@ -1877,7 +1906,7 @@ async function libOpen(id){
     for (const c of ["scene", "tokens", "drawings", "fog"]) { const val = getColFull(c); try { if (JSON.stringify(val).length < 180000) send("state", {col: c, val}); } catch {} }
     dirty = true; drawTop(); drawEmpty(); fit();
     const b = mapBox(); if (b) setTimeout(() => send("view", {x: b[0] + b[2] / 2, y: b[1] + b[3] / 2, z: cam.z}), 300);
-    toast(`Mapa “${scene.libName}” aberto.`);
+    toast(`Mapa “${scene.libName}” aberto.`); sndApplyMap();
   } finally { libBusy = false; if (panelKind === "maps") openMapsPanel(); }
 }
 const getColFull = c => c === "scene" ? scene : c === "tokens" ? tokens : c === "fog" ? fog : drawings;
@@ -1906,12 +1935,13 @@ async function openMapsPanel(){
       <div class="acts" style="margin-top:8px">${scene.libId ? `<button class="btn small primary" id="mSave">💾 Salvar</button>` : ""}<button class="btn small ${scene.libId ? "" : "primary"}" id="mSaveAs">Salvar como novo…</button><button class="btn small" id="mBlank" title="Começar um mapa vazio na mesa">＋ Mapa vazio</button><button class="btn small" id="mNewTab" title="Criar e montar um mapa em outra aba, sem mexer na mesa">✏️ Novo em outra aba</button></div>
       <form id="mForm" hidden><input type="text" id="mName" maxlength="40" placeholder="Nome do mapa" required><select id="mFolder">${groups.map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join("")}</select><button class="btn small primary">Salvar</button></form></div>
     <p class="hint">Monte os mapas antes da sessão e na hora é só abrir. Ao abrir outro, o que está aberto é salvo sozinho. Arraste um mapa para outra pasta.</p>
-    <div class="acts"><button class="btn small" id="mNewF">＋ Nova pasta</button></div>
+    <div class="acts"><button class="btn small" id="mNewF">＋ Nova pasta</button><span class="spacer"></span>${EDIT_ID ? "" : `<button class="btn small" id="bkDown" title="Baixa um arquivo com todos os mapas, fichas, anotações, chat e a lista de sons">💾 Backup</button><button class="btn small" id="bkUp" title="Volta tudo a partir de um arquivo de backup">📥 Restaurar</button>`}</div>
     ${groups.map(([k, l]) => { const ms = libList.filter(m => m.f === k); if (!k && !ms.length && libFolders.length) return "";
       return `<div class="mfold" data-fold="${esc(k)}"><div class="mfh"><button class="mft" data-tog="${esc(k)}" aria-expanded="${!libClosed[k]}">${libClosed[k] ? "▸" : "▾"} 📁 ${esc(l)} <small>${ms.length}</small></button>${k ? `<button class="btn small ic" data-fren="${esc(k)}" title="Renomear pasta" aria-label="Renomear pasta">✎</button><button class="btn small ic danger" data-fdel="${esc(k)}" title="Apagar pasta" aria-label="Apagar pasta">🗑</button>` : ""}</div>
         ${libClosed[k] ? "" : `<div class="mlist">${ms.map(row).join("") || `<p class="hint" style="margin:4px 8px">Vazia.</p>`}</div>`}</div>`; }).join("")}
     </div>`;
   $("#pClose").onclick = closePanel;
+  if ($("#bkDown")) { $("#bkDown").onclick = backupDownload; $("#bkUp").onclick = backupRestore; }
   const refresh = async () => { await libLoad(); if (panelKind === "maps") openMapsPanel(); };
   if ($("#mSave")) $("#mSave").onclick = async () => { await libSaveCur(); refresh(); };
   $("#mSaveAs").onclick = () => { const f = $("#mForm"); f.hidden = !f.hidden; if (!f.hidden) { $("#mName").value = scene.libId ? scene.libName + " (cópia)" : ""; $("#mFolder").value = scene.libF || ""; $("#mName").focus(); } };
@@ -2269,7 +2299,8 @@ const iniTok = e => e.tk ? tokens.find(t => t.id === e.tk) : null;
 const iniOwner = e => { const t = iniTok(e); return t?.o || ""; };
 const iniMine = e => { const t = iniTok(e); return !!t && owns(t); };
 function iniSort(){ const I = INI(), curId = I.list[I.cur]?.id; I.list.sort((a, b) => (b.v ?? -99) - (a.v ?? -99)); if (curId) I.cur = Math.max(0, I.list.findIndex(e => e.id === curId)); }
-function iniMod(t){ // bônus de iniciativa: pega do nome da barra "Ini"/"Inic" se existir
+function iniMod(t){ // bônus de iniciativa: da ficha ligada, ou da barra "Ini"/"Inic" se existir
+  const sh = t?.sh && shById(t.sh); if (sh) return amod(sh, "des") + (+sh.ib || 0);
   const b = (t?.b || []).find(x => /^ini/i.test(x.n || "")); return b ? (+b.v || 0) : 0;
 }
 function iniAdd(t){ const I = INI(); if (I.list.some(e => e.tk === t.id)) return false; const m = iniMod(t); I.list.push({id: uid(), tk: t.id, n: t.n || "Token", f: `1d20${m ? (m > 0 ? "+" : "") + m : ""}`, v: null, hid: !!t.h}); return true; }
@@ -2315,7 +2346,10 @@ function iniGo(step){ // próximo / anterior turno
   I.cur += step;
   if (I.cur >= I.list.length) { I.cur = 0; I.round++; toast(`⚔️ Rodada ${I.round}`, 1600); }
   if (I.cur < 0) { I.cur = I.list.length - 1; I.round = Math.max(1, I.round - 1); }
-  const t = iniTok(I.list[I.cur]); if (t && t.tr?.length) { t.tr = []; save("tokens"); }   // rastro do novo turno começa limpo
+  const t = iniTok(I.list[I.cur]); let tch = false; if (t && t.tr?.length) { t.tr = []; tch = true; }   // rastro do novo turno começa limpo
+  if (t && step > 0 && condTick(t)) tch = true;
+  if (t && step > 0 && (t.mt || t.dash)) { t.mt = 0; t.dash = 0; tch = true; }
+  if (tch) save("tokens");
   iniSave();
 }
 function openIniPanel(){
@@ -2343,10 +2377,10 @@ function openIniPanel(){
   $("#iSort").onclick = () => { iniSort(); iniSave(); };
   $("#iClear").onclick = () => { if (confirm("Tirar todo mundo da lista de iniciativa?")) { scene.init = {on: false, round: 1, cur: 0, list: []}; iniSave(); } };
   $("#iAsk").onclick = () => { const L = I.list.filter(e => iniOwner(e)).map(e => ({id: e.id, n: e.n, f: e.f, o: iniOwner(e)})); if (!L.length) return toast("Nenhum token de jogador na lista (dê um dono ao token)."); send("iniask", {list: L}); toast("Pedido enviado: os jogadores vão rolar."); };
-  if ($("#iStart")) $("#iStart").onclick = () => { const shown = []; for (const e of I.list) if (e.v == null) shown.push(iniRoll(e)); iniShow(shown); iniSort(); Object.assign(I, {on: true, round: 1, cur: 0, go: Date.now()}); iniSave(); };
+  if ($("#iStart")) $("#iStart").onclick = () => { const shown = []; for (const e of I.list) if (e.v == null) shown.push(iniRoll(e)); iniShow(shown); iniSort(); Object.assign(I, {on: true, round: 1, cur: 0, go: Date.now()}); for (const t of tokens) { delete t.mt; delete t.dash; } save("tokens"); iniSave(); sndCombat(true); };
   if ($("#iNext")) $("#iNext").onclick = () => iniGo(1);
   if ($("#iPrev")) $("#iPrev").onclick = () => iniGo(-1);
-  if ($("#iEnd")) $("#iEnd").onclick = () => { I.on = false; iniSave(); toast("Combate encerrado."); };
+  if ($("#iEnd")) $("#iEnd").onclick = () => { I.on = false; for (const t of tokens) { delete t.mt; delete t.dash; } save("tokens"); iniSave(); toast("Combate encerrado."); sndCombat(false); };
   P.oninput = e => { const d = e.target.dataset; const i = +(d.in ?? d.if ?? d.iv); if (isNaN(i)) return; const en = I.list[i];
     if (d.in != null) en.n = e.target.value; else if (d.if != null) en.f = e.target.value; else { const v = e.target.value.trim(); en.v = v === "" ? null : +v || 0; }
     clearTimeout(P._t); P._t = setTimeout(() => { save("scene", "merge"); drawTurnBar(); }, 400); };
@@ -2376,7 +2410,7 @@ function drawTurnBar(){
     <div class="tb-list">${vis.map(({e, i}) => { const t = iniTok(e), on = i === I.cur; return `<button class="tb-p ${on ? "on" : ""} ${iniMine(e) ? "mine" : ""} ${e.hid ? "hid" : ""} ${!t && e.tk ? "gone" : ""}" data-tb="${i}" style="--pc:${esc(t?.c || "#6b5a44")}" title="${esc(e.n)}${e.v != null ? " · iniciativa " + e.v : ""}">
         <span class="tb-img">${t?.img ? `<img src="${esc(t.img)}" alt="">` : `<span>${esc((e.n || "?").slice(0, 2).toUpperCase())}</span>`}</span>
         ${isGM || t?.o ? (t?.b?.[0] ? `<span class="tb-hp"><i style="width:${Math.max(0, Math.min(100, (+t.b[0].v || 0) / Math.max(1, +t.b[0].m || 1) * 100))}%"></i></span>` : "") : ""}
-        <span class="tb-n">${esc(e.n)}</span>${on ? `<span class="tb-arrow">▲</span>` : ""}${e.v != null ? `<span class="tb-ini">${e.v}</span>` : ""}</button>`; }).join("")}</div>
+        ${t && condsOf(t).length && (isGM || !t.h) ? `<span class="tb-cd">${condsOf(t).slice(0, 3).map(c => condInfo(c.k)[1]).join("")}</span>` : ""}<span class="tb-n">${esc(e.n)}</span>${on ? `<span class="tb-arrow">▲</span>` : ""}${e.v != null ? `<span class="tb-ini">${e.v}</span>` : ""}</button>`; }).join("")}</div>
     ${isGM ? `<button class="tb-nav next" id="tbNext" title="Próximo turno">▶</button>` : cur && iniMine(cur) ? `<button class="btn small primary tb-end" id="tbEnd">✔ Terminar meu turno</button>` : ""}`;
   if (tbIntro.active) { el.classList.add("intro"); el.querySelectorAll(".tb-p").forEach((p, k) => p.classList.add(k < tbIntro.shown ? "in" : "pre")); }
   if (isGM) { $("#tbPrev").onclick = () => iniGo(-1); $("#tbNext").onclick = () => iniGo(1); }
@@ -2448,6 +2482,526 @@ function iniAskPrompt(list){ // jogador: rolar a iniciativa dos seus personagens
     send("inires", {id: b.dataset.ia, v: r.total, who: myNick}); b.remove(); if (!box.querySelector("[data-ia]")) box.remove(); };
 }
 
+// ---------- condições nos tokens (envenenado, caído…) com contagem de rodadas ----------
+// t.cd = [{k, r}] · r = rodadas que faltam (vazio = sem limite). Desce no começo do turno do token.
+const CONDS = [
+  ["agarrado", "🤼", "Agarrado", "Deslocamento vira 0."],
+  ["amedrontado", "😱", "Amedrontado", "Desvantagem em testes e ataques enquanto vê a fonte do medo; não pode se aproximar dela."],
+  ["atordoado", "💫", "Atordoado", "Incapacitado, não se move, fala com dificuldade. Falha em salvaguardas de FOR e DES. Ataques contra ele têm vantagem."],
+  ["caido", "🛌", "Caído", "Só rasteja. Desvantagem nos ataques. Ataques corpo a corpo contra ele têm vantagem; à distância, desvantagem."],
+  ["cego", "🙈", "Cego", "Não enxerga. Desvantagem nos ataques; ataques contra ele têm vantagem."],
+  ["contido", "⛓️", "Contido", "Deslocamento 0. Desvantagem nos ataques e em salvaguardas de DES. Ataques contra ele têm vantagem."],
+  ["enfeiticado", "💕", "Enfeitiçado", "Não ataca quem o enfeitiçou; essa criatura tem vantagem em testes sociais com ele."],
+  ["envenenado", "🤢", "Envenenado", "Desvantagem em ataques e testes de habilidade."],
+  ["exausto", "😩", "Exausto", "Níveis de exaustão (anote o nível nas rodadas, se quiser)."],
+  ["incapacitado", "😵", "Incapacitado", "Não pode fazer ações nem reações."],
+  ["inconsciente", "💤", "Inconsciente", "Incapacitado, caído, larga o que segura. Ataques contra ele têm vantagem; corpo a corpo perto é crítico."],
+  ["invisivel", "👻", "Invisível", "Não pode ser visto sem ajuda. Vantagem nos ataques; ataques contra ele têm desvantagem."],
+  ["paralisado", "🧊", "Paralisado", "Incapacitado, não se move nem fala. Ataques têm vantagem; corpo a corpo perto é crítico."],
+  ["petrificado", "🗿", "Petrificado", "Vira pedra. Incapacitado, resistência a todo dano."],
+  ["surdo", "🙉", "Surdo", "Não ouve; falha em testes que dependem de audição."],
+  ["concentrando", "🧠", "Concentrando", "Mantendo uma magia. Ao sofrer dano: salvaguarda de CON (CD 10 ou metade do dano)."],
+  ["abencoado", "✨", "Abençoado", "Bônus (ex.: +1d4) em ataques e salvaguardas."],
+  ["queimando", "🔥", "Queimando", "Sofre dano de fogo no começo do turno."],
+  ["sangrando", "🩸", "Sangrando", "Perde vida a cada turno."],
+  ["escondido", "🫥", "Escondido", "Os inimigos não sabem onde ele está."],
+  ["marcado", "🎯", "Marcado", "Alvo marcado (Marca do Caçador, Maldição…)."],
+  ["lento", "🐌", "Lento", "Deslocamento reduzido pela metade."],
+];
+const condInfo = k => CONDS.find(c => c[0] === k);
+const condsOf = t => (t?.cd || []).filter(c => c && condInfo(c.k));
+function paintConds(t){ // bolinhas com o emoji em volta do token (lado esquerdo, de cima para baixo)
+  const L = condsOf(t); if (!L.length || (!isGM && t.h)) return;
+  const r = tokR(t), s = Math.max(9 / cam.z, r * .36), n = Math.min(L.length, 6);
+  ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (let i = 0; i < n; i++) {
+    const an = Math.PI * (1.12 + i * .2), x = t.x + Math.cos(an) * (r + s * .15), y = t.y + Math.sin(an) * (r + s * .15);
+    ctx.beginPath(); ctx.arc(x, y, s * .62, 0, Math.PI * 2); ctx.fillStyle = "rgba(20,15,11,.92)"; ctx.fill(); ctx.lineWidth = 1.2 / cam.z; ctx.strokeStyle = "#d0a54c"; ctx.stroke();
+    const c = L[i]; ctx.font = `${s * .72}px sans-serif`; ctx.fillStyle = "#fff"; ctx.fillText(i === 5 && L.length > 6 ? "+" + (L.length - 5) : condInfo(c.k)[1], x, y + s * .04);
+    if (c.r > 0 && !(i === 5 && L.length > 6)) { ctx.font = `700 ${s * .42}px "Alegreya Sans", sans-serif`; const bx = x + s * .45, by = y + s * .42; ctx.beginPath(); ctx.arc(bx, by, s * .28, 0, Math.PI * 2); ctx.fillStyle = "#d0a54c"; ctx.fill(); ctx.fillStyle = "#1c150c"; ctx.fillText(String(c.r), bx, by + s * .02); }
+  }
+  ctx.restore();
+}
+function condSave(t){ // mestre salva; jogador pede ao mestre
+  dirty = true; selBarKey = ""; drawTurnBar();
+  if (isGM) { save("tokens"); return; }
+  tokReq({id: t.id, cd: condsOf(t).map(c => ({k: c.k, r: c.r || ""})), who: myNick});
+}
+function condClean(list){ return (Array.isArray(list) ? list : []).slice(0, 24).filter(c => c && condInfo(String(c.k))).map(c => ({k: String(c.k), r: +c.r > 0 ? Math.min(99, Math.round(+c.r)) : ""})); }
+let condDur = "";
+function openCondPop(t){
+  let el = $("#condPop"); if (!el) { el = document.createElement("div"); el.id = "condPop"; el.className = "condpop"; document.body.appendChild(el); el.onpointerdown = e => e.stopPropagation(); el.onkeydown = e => e.stopPropagation(); }
+  const draw = () => {
+    const cur = tokens.find(x => x.id === t.id); if (!cur) return el.remove();
+    const on = new Map(condsOf(cur).map(c => [c.k, c]));
+    el.innerHTML = `<div class="cp-head"><b>Condições · ${esc(cur.n || "Token")}</b><span class="spacer"></span><label class="cp-dur" title="Quantas rodadas a condição dura quando você liga (vazio = até tirar). Desce 1 no começo de cada turno do token.">Duração <input id="cpDur" inputmode="numeric" placeholder="∞" value="${esc(condDur)}"> rodadas</label><button class="be-x" data-cp="close" aria-label="Fechar">✕</button></div>
+      <div class="cp-grid">${CONDS.map(([k, e, n, d]) => { const c = on.get(k); return `<button class="cp-c" data-ck="${k}" aria-pressed="${!!c}" title="${esc(n)}: ${esc(d)}"><span>${e}</span>${esc(n)}${c ? `<i class="cp-r">${c.r > 0 ? c.r : "∞"}</i>` : ""}</button>`; }).join("")}</div>
+      ${on.size ? `<div class="cp-on">${[...on.values()].map(c => { const [, e, n] = condInfo(c.k); return `<span class="cp-chip">${e} ${esc(n)} <button data-cm="${c.k}" title="Uma rodada a menos">−</button><b>${c.r > 0 ? c.r : "∞"}</b><button data-cpl="${c.k}" title="Uma rodada a mais">+</button><button data-ck="${c.k}" title="Tirar">✕</button></span>`; }).join("")}</div>` : `<p class="hint" style="margin:6px 0 0">Clique numa condição para ligar ou desligar. Passe o mouse para ver o que ela faz.</p>`}`;
+    const di = $("#cpDur"); di.oninput = () => { condDur = di.value.replace(/\D/g, "").slice(0, 2); };
+    placeCondPop();
+  };
+  el.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return; const cur = tokens.find(x => x.id === t.id); if (!cur) return; const d = b.dataset;
+    if (d.cp === "close") return el.remove();
+    cur.cd = condsOf(cur);
+    if (d.ck) { const i = cur.cd.findIndex(c => c.k === d.ck); if (i >= 0) cur.cd.splice(i, 1); else { cur.cd.push({k: d.ck, r: +condDur > 0 ? +condDur : ""}); if (DS.init()) DS.tone(DS.ctx.currentTime, 620, .12, .06, "triangle"); } }
+    else if (d.cm || d.cpl) { const c = cur.cd.find(x => x.k === (d.cm || d.cpl)); if (!c) return; const v = (+c.r || 0) + (d.cm ? -1 : 1); if (v <= 0 && d.cm) c.r = ""; else c.r = Math.min(99, Math.max(1, v)); }
+    condSave(cur); draw();
+  };
+  draw();
+}
+function placeCondPop(){ const el = $("#condPop"), sb = $("#selbar"); if (!el) return; const r = sb && !sb.hidden ? sb.getBoundingClientRect() : {top: innerHeight - 120}; el.style.bottom = Math.max(8, innerHeight - r.top + 8) + "px"; }
+function condTick(t){ // começo do turno do token: desce as rodadas (só o mestre)
+  if (!isGM || !t?.cd?.length) return false; let ch = false; const gone = [];
+  t.cd = condsOf(t).filter(c => { if (!(c.r > 0)) return true; c.r--; ch = true; if (c.r <= 0) { gone.push(condInfo(c.k)[2]); return false; } return true; });
+  if (gone.length) toast(`⏳ ${t.n || "Token"}: acabou ${gone.join(", ")}.`, 2600);
+  return ch;
+}
+// ---------- fichas de personagem (linha 997 do map_state, coluna drawings) ----------
+// o mestre salva; o jogador edita a própria ficha e manda para o mestre salvar (como os tokens)
+const SH_ROW = 997;
+const ATTRS = [["for", "Força", "FOR"], ["des", "Destreza", "DES"], ["con", "Constituição", "CON"], ["int", "Inteligência", "INT"], ["sab", "Sabedoria", "SAB"], ["car", "Carisma", "CAR"]];
+const SKILLS = [["acrobacia", "Acrobacia", "des"], ["adestrar", "Adestrar Animais", "sab"], ["arcanismo", "Arcanismo", "int"], ["atletismo", "Atletismo", "for"], ["atuacao", "Atuação", "car"], ["enganacao", "Enganação", "car"], ["furtividade", "Furtividade", "des"], ["historia", "História", "int"], ["intimidacao", "Intimidação", "car"], ["intuicao", "Intuição", "sab"], ["investigacao", "Investigação", "int"], ["medicina", "Medicina", "sab"], ["natureza", "Natureza", "int"], ["percepcao", "Percepção", "sab"], ["persuasao", "Persuasão", "car"], ["prestidigitacao", "Prestidigitação", "des"], ["religiao", "Religião", "int"], ["sobrevivencia", "Sobrevivência", "sab"]];
+const MONEY = [["pc", "PC", "cobre"], ["pp", "PP", "prata"], ["pe", "PE", "electro"], ["po", "PO", "ouro"], ["pl", "PL", "platina"]];
+let sheets = null, shOpen = null, shTab = "main", shAdv = 0, shSaveT = null;
+const shNew = (o, n) => ({id: uid(), n: n || "Novo personagem", o: o || "", img: "", cls: "", lvl: 1, race: "", at: {for: 10, des: 10, con: 10, int: 10, sab: 10, car: 10}, ca: 10, pv: 10, pvm: 10, pvt: 0, sp: 9, ib: 0, sv: {}, sk: {}, insp: 0, ds: {s: 0, f: 0},
+  atk: [], cast: "int", slots: {}, sp_: [], inv: [], money: {}, tr: "", nt: "", at_: Date.now()});
+const modOf = v => Math.floor(((+v || 10) - 10) / 2);
+const sgn = v => (v >= 0 ? "+" : "−") + Math.abs(v);
+const profOf = sh => 2 + Math.floor((Math.max(1, Math.min(20, +sh.lvl || 1)) - 1) / 4);
+const amod = (sh, k) => modOf(sh.at?.[k]);
+const skillMod = (sh, s) => amod(sh, s[2]) + profOf(sh) * (+sh.sk?.[s[0]] || 0);
+const saveMod = (sh, k) => amod(sh, k) + (sh.sv?.[k] ? profOf(sh) : 0);
+const castMod = sh => amod(sh, sh.cast || "int");
+const shById = id => (sheets || []).find(s => s.id === id);
+const canEditSh = sh => !!sh && (isGM || (!!sh.o && (sh.o === "*" || (!!myNick && sh.o.toLowerCase() === myNick.toLowerCase()))));
+const shTok = sh => tokens.find(t => t.sh === sh.id && !isProp(t));
+async function shLoad(){
+  const {data, error} = await sb.from("map_state").select("drawings").eq("id", SH_ROW).maybeSingle();
+  if (error) { toast("Não carreguei as fichas: " + error.message); sheets = sheets || []; return; }
+  sheets = Array.isArray(data?.drawings) ? data.drawings : [];
+}
+function shClean(x, prev){ // o mestre só aceita campos conhecidos, com limites
+  const S = (v, n) => String(v ?? "").slice(0, n), N = (v, a, b, d = 0) => { v = Math.round(+v); return isFinite(v) ? Math.max(a, Math.min(b, v)) : d; };
+  const o = shNew(prev?.o ?? S(x.o, 30)); o.id = S(prev?.id || x.id, 20) || uid();
+  Object.assign(o, {n: S(x.n, 40) || "Personagem", img: S(x.img, 400), cls: S(x.cls, 40), race: S(x.race, 40), lvl: N(x.lvl, 1, 20, 1), ca: N(x.ca, 0, 40, 10), pv: N(x.pv, -99, 999), pvm: N(x.pvm, 0, 999, 10), pvt: N(x.pvt, 0, 999), sp: N(x.sp, 0, 99, 9), ib: N(x.ib, -10, 20), insp: x.insp ? 1 : 0,
+    ds: {s: N(x.ds?.s, 0, 3), f: N(x.ds?.f, 0, 3)}, cast: ATTRS.some(a => a[0] === x.cast) ? x.cast : "int", tr: S(x.tr, 6000), nt: S(x.nt, 6000), at_: Date.now()});
+  for (const [k] of ATTRS) { o.at[k] = N(x.at?.[k], 1, 30, 10); if (x.sv?.[k]) o.sv[k] = 1; }
+  for (const [k] of SKILLS) { const v = N(x.sk?.[k], 0, 2); if (v) o.sk[k] = v; }
+  o.atk = (Array.isArray(x.atk) ? x.atk : []).slice(0, 20).map(a => ({n: S(a?.n, 40), a: ["for", "des", "mag", ""].includes(a?.a) ? a.a : "for", pr: a?.pr ? 1 : 0, bx: N(a?.bx, -20, 20), d: S(a?.d, 30), dm: a?.dm ? 1 : 0, t: S(a?.t, 20)}));
+  for (let l = 1; l <= 9; l++) { const s = x.slots?.[l]; if (s && +s.m > 0) o.slots[l] = {m: N(s.m, 0, 9), u: N(s.u, 0, 9)}; }
+  o.sp_ = (Array.isArray(x.sp_) ? x.sp_ : []).slice(0, 80).map(p => ({n: S(p?.n, 50), l: N(p?.l, 0, 9), f: S(p?.f, 30), atk: p?.atk ? 1 : 0, d: S(p?.d, 1500)}));
+  o.inv = (Array.isArray(x.inv) ? x.inv : []).slice(0, 120).map(i => ({n: S(i?.n, 60), q: N(i?.q, 0, 9999, 1)}));
+  for (const [k] of MONEY) { const v = N(x.money?.[k], 0, 9999999); if (v) o.money[k] = v; }
+  return o;
+}
+function shSaveGM(){ // mestre grava a lista toda (junta várias mudanças)
+  clearTimeout(shSaveT); shSaveT = setTimeout(async () => {
+    const {error} = await sb.from("map_state").upsert({id: SH_ROW, drawings: sheets, updated_at: new Date().toISOString()});
+    if (error) toast("Não salvei as fichas: " + error.message);
+  }, 500);
+}
+function shCommit(sh){ // guarda a mudança: mestre salva e avisa; jogador pede ao mestre
+  sh.at_ = Date.now();
+  if (isGM) { shSaveGM(); send("sheet", {sh}); shSyncTokens(sh); }
+  else send("sheetreq", {sh, who: myNick});
+  if (panelKind === "sheets") openSheetsPanel();
+}
+function pvBar(t){ const b = t.b || []; let i = b.findIndex(x => x && /^(pv|hp|vida)/i.test(x.n || "")); if (i < 0 && b[0] && !b[0].n) i = 0; return i; }
+function shSyncTokens(sh){ // mestre: tokens ligados à ficha recebem PV e deslocamento
+  if (!isGM) return; let ch = false;
+  for (const t of tokens) { if (t.sh !== sh.id) continue; t.b = t.b || []; let i = pvBar(t);
+    if (i < 0) { t.b.unshift({n: "PV", v: sh.pv, m: sh.pvm || "", c: "#c0473a"}); ch = true; }
+    else if (+t.b[i].v !== +sh.pv || +t.b[i].m !== +sh.pvm) { t.b[i].v = sh.pv; t.b[i].m = sh.pvm || ""; ch = true; }
+    if (+sh.sp > 0 && +t.sp !== +sh.sp) { t.sp = +sh.sp; ch = true; } }
+  if (ch) { save("tokens"); dirty = true; selBarKey = ""; }
+}
+function shFromTokenPV(t, i){ // mudou a barra de PV do token: a ficha acompanha
+  const sh = t?.sh && shById(t.sh); if (!sh || i !== pvBar(t) || !canEditSh(sh)) return;
+  const v = Math.round(+t.b[i].v); if (!isFinite(v) || v === +sh.pv) return; sh.pv = v; shCommit(sh); if (shOpen === sh.id) drawSheet();
+}
+function shRoll(sh, formula, label){
+  let res; try { res = rollFormula(formula, /^1d20/.test(formula) ? shAdv : 0); } catch (err) { return toast("Não rolei: " + err.message); }
+  if (shAdv && /^1d20/.test(formula)) res.f += shAdv > 0 ? " (vantagem)" : " (desvantagem)";
+  const r = {id: uid(), v: MAP_VER, who: sh.n || myNick || "Personagem", label, ...res, secret: false, snd: null, col: shTok(sh)?.c || "#d0a54c"};
+  send("roll", r); addRoll(r, true); return r;
+}
+const d20 = m => "1d20" + (m ? (m > 0 ? "+" : "-") + Math.abs(m) : "");
+// painel com a lista de fichas
+function openSheetsPanel(){
+  panelKind = "sheets";
+  const list = (sheets || []).filter(s => isGM || canEditSh(s));
+  $("#panel").innerHTML = `<div class="panel" role="dialog" aria-label="Fichas"><h3>Fichas de personagem<button class="btn small" id="pClose">Fechar</button></h3>
+    <div class="acts"><button class="btn small primary" id="shAdd">＋ Nova ficha</button>${isGM ? `<button class="btn small" id="shAddSel" title="Cria uma ficha já ligada ao token selecionado">＋ Ficha do token selecionado</button>` : ""}</div>
+    <div class="shlist">${list.map(s => { const t = shTok(s); return `<button class="shrow" data-sho="${esc(s.id)}"><span class="shp" style="--pc:${esc(t?.c || "#6b5a44")}">${s.img ? `<img src="${esc(s.img)}" alt="">` : esc((s.n || "?").slice(0, 2).toUpperCase())}</span><span class="shn"><b>${esc(s.n)}</b><small>${esc([s.race, s.cls && s.cls + " " + (s.lvl || 1)].filter(Boolean).join(" · ") || "sem classe")}${isGM ? ` · ${s.o ? "de " + esc(s.o) : "do mestre"}` : ""}</small></span><span class="shpv">❤ ${s.pv}/${s.pvm}</span>${t ? `<span class="shlink" title="Ligada ao token ${esc(t.n || "")}">🔗</span>` : ""}</button>`; }).join("") || `<p class="hint">${isGM ? "Nenhuma ficha ainda. Crie uma para cada personagem (e para monstros importantes)." : "Você ainda não tem ficha. Crie a do seu personagem."}</p>`}</div>
+    <p class="hint">Na ficha, clique nos números (atributos, perícias, ataques) para rolar. Ligue a ficha a um token: a vida e o deslocamento dele passam a vir da ficha.${isGM ? "" : " O mestre precisa estar com o mapa aberto para a ficha ser salva."}</p></div>`;
+  $("#pClose").onclick = closePanel;
+  $("#shAdd").onclick = () => { const sh = shNew(isGM ? "" : myNick, isGM ? "Novo personagem" : (myNick || "Meu personagem")); sheets.push(sh); shCommit(sh); openSheet(sh.id); };
+  const as = $("#shAddSel"); if (as) as.onclick = () => { const t = tokens.find(x => x.id === selTok && !isProp(x)); if (!t) return toast("Selecione um token no mapa primeiro.");
+    const sh = shNew(t.o || "", t.n || "Personagem"); if (t.img) sh.img = t.img; const i = pvBar(t); if (i >= 0 && +t.b[i].m > 0) { sh.pv = +t.b[i].v || 0; sh.pvm = +t.b[i].m; } if (t.sp) sh.sp = +t.sp;
+    sheets.push(sh); t.sh = sh.id; shCommit(sh); save("tokens"); openSheet(sh.id); };
+  $("#panel").querySelector(".shlist").onclick = e => { const b = e.target.closest("[data-sho]"); if (b) openSheet(b.dataset.sho); };
+}
+function openSheet(id){ shOpen = id; drawSheet(true); }
+function closeSheet(){ shOpen = null; $("#sheetWin")?.remove(); }
+function drawSheet(fresh){
+  const sh = shById(shOpen); if (!sh) return closeSheet();
+  const ed = canEditSh(sh), dis = ed ? "" : "disabled", P = profOf(sh), t = shTok(sh);
+  let w = $("#sheetWin");
+  if (!w) { w = document.createElement("div"); w.id = "sheetWin"; w.className = "sheetwin"; document.body.appendChild(w); w.onpointerdown = e => e.stopPropagation(); w.onkeydown = e => { e.stopPropagation(); if (e.key === "Escape") closeSheet(); }; w.onwheel = e => e.stopPropagation(); }
+  const keepScroll = w.querySelector(".sw-body")?.scrollTop || 0, af = w.contains(document.activeElement) ? document.activeElement.dataset?.f : null;
+  const inp = (f, v, cls = "", extra = "") => `<input class="${cls}" data-f="${f}" value="${esc(v ?? "")}" ${dis} ${extra}>`;
+  const num = (f, v, cls = "", extra = "") => inp(f, v, "num " + cls, `inputmode="numeric" ${extra}`);
+  const rollBtn = (formula, label, txt, cls = "") => `<button class="sw-roll ${cls}" data-roll="${esc(formula)}" data-rl="${esc(label)}" title="Rolar ${esc(label)}: ${esc(formula)}">${txt}</button>`;
+  const tabs = [["main", "Principal"], ["cbt", "Combate"], ["mag", "Magias"], ["inv", "Inventário"], ["nt", "Notas"]];
+  let body = "";
+  if (shTab === "main") body = `
+    <div class="sw-stats">
+      <label class="sw-stat"><span>CA</span>${num("ca", sh.ca, "big")}</label>
+      <div class="sw-stat hp"><span>Vida</span><div class="sw-hp">${ed ? `<button data-hp="-5">−5</button><button data-hp="-1">−1</button>` : ""}${num("pv", sh.pv, "big")}<em>/</em>${num("pvm", sh.pvm)}${ed ? `<button data-hp="1">+1</button><button data-hp="5">+5</button>` : ""}</div><small>temporária ${num("pvt", sh.pvt, "tiny")}</small></div>
+      <label class="sw-stat"><span>Desloc. (${esc(G().unitName || "m")})</span>${num("sp", sh.sp, "big")}</label>
+      <div class="sw-stat"><span>Iniciativa</span>${rollBtn(d20(amod(sh, "des") + (+sh.ib || 0)), "Iniciativa", sgn(amod(sh, "des") + (+sh.ib || 0)), "big")}<small>bônus extra ${num("ib", sh.ib, "tiny")}</small></div>
+      <div class="sw-stat"><span>Proficiência</span><b class="big">${sgn(P)}</b><small>pelo nível</small></div>
+      <label class="sw-stat chk"><span>Inspiração</span><input type="checkbox" data-f="insp" ${sh.insp ? "checked" : ""} ${dis}></label>
+    </div>
+    <div class="sw-attrs">${ATTRS.map(([k, n, s]) => { const m = amod(sh, k), sv = saveMod(sh, k); return `<div class="sw-attr"><span class="sw-an">${n}</span>${rollBtn(d20(m), "Teste de " + n, sgn(m), "mod")}${num("at." + k, sh.at[k], "score")}
+      <div class="sw-save"><label title="Proficiente na salvaguarda"><input type="checkbox" data-f="sv.${k}" ${sh.sv?.[k] ? "checked" : ""} ${dis}></label>${rollBtn(d20(sv), "Salvaguarda de " + s, "Salv. " + sgn(sv))}</div></div>`; }).join("")}</div>
+    <div class="sw-skills"><div class="sw-sub">Perícias <small>clique no ● para proficiência (●● = especialista) · Percepção passiva ${10 + skillMod(sh, SKILLS[13])}</small></div>
+      <div class="sw-skgrid">${SKILLS.map(s => { const v = +sh.sk?.[s[0]] || 0, m = skillMod(sh, s); return `<div class="sw-sk"><button class="sw-pr p${v}" data-sk="${s[0]}" ${dis} title="${v === 2 ? "Especialista" : v ? "Proficiente" : "Sem proficiência"}">${v === 2 ? "●●" : v ? "●" : "○"}</button>${rollBtn(d20(m), s[1], `<b>${sgn(m)}</b> ${s[1]} <small>${s[2].toUpperCase()}</small>`, "skill")}</div>`; }).join("")}</div></div>`;
+  else if (shTab === "cbt") body = `
+    <div class="sw-sub">Ataques ${ed ? `<button class="btn small" data-add="atk">＋ Ataque</button>` : ""}</div>
+    <div class="sw-atks">${sh.atk.map((a, i) => { const m = a.a === "mag" ? castMod(sh) : a.a ? amod(sh, a.a) : 0, hit = m + (a.pr ? P : 0) + (+a.bx || 0), dmg = (a.d || "") + (a.dm && m ? (m > 0 ? "+" : "-") + Math.abs(m) : "");
+      return `<div class="sw-atk">${inp(`atk.${i}.n`, a.n, "grow", 'placeholder="Espada longa"')}
+        <select data-f="atk.${i}.a" ${dis} title="Atributo do ataque">${[["for", "FOR"], ["des", "DES"], ["mag", "Magia"], ["", "—"]].map(([k, l]) => `<option value="${k}" ${a.a === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <label class="mini" title="Soma a proficiência"><input type="checkbox" data-f="atk.${i}.pr" ${a.pr ? "checked" : ""} ${dis}>prof</label>
+        <label class="mini" title="Bônus extra (arma mágica…)">+${num(`atk.${i}.bx`, a.bx, "tiny")}</label>
+        ${rollBtn(d20(hit), (a.n || "Ataque"), "🎯 " + sgn(hit))}
+        ${inp(`atk.${i}.d`, a.d, "dmg", 'placeholder="1d8" title="Dados de dano"')}<label class="mini" title="Soma o modificador no dano"><input type="checkbox" data-f="atk.${i}.dm" ${a.dm ? "checked" : ""} ${dis}>+mod</label>
+        ${inp(`atk.${i}.t`, a.t, "dmg", 'placeholder="cortante"')}
+        ${a.d ? rollBtn(dmg, "Dano · " + (a.n || "ataque"), "💥 " + esc(dmg)) : ""}${ed ? `<button class="sw-x" data-del="atk.${i}" title="Apagar">✕</button>` : ""}</div>`; }).join("") || `<p class="hint">Nenhum ataque. Adicione armas e ataques para rolar o acerto e o dano com um clique.</p>`}</div>
+    <div class="sw-sub">Testes contra a morte</div>
+    <div class="sw-death"><span>Sucessos ${[1, 2, 3].map(k => `<button class="pip ok ${sh.ds.s >= k ? "on" : ""}" data-ds="s${k}" ${dis}></button>`).join("")}</span><span>Falhas ${[1, 2, 3].map(k => `<button class="pip bad ${sh.ds.f >= k ? "on" : ""}" data-ds="f${k}" ${dis}></button>`).join("")}</span>
+      ${ed ? `<button class="btn small" data-act="death">🎲 Rolar teste</button><button class="btn small" data-act="dsreset">Zerar</button>` : ""}</div>
+    ${ed ? `<div class="sw-sub">Descanso</div><div class="acts"><button class="btn small" data-act="long">🌙 Descanso longo</button><small class="hint">Vida cheia, espaços de magia de volta, testes de morte zerados.</small></div>` : ""}`;
+  else if (shTab === "mag") { const cm = castMod(sh); body = `
+    <div class="sw-row"><label>Atributo de conjuração <select data-f="cast" ${dis}>${ATTRS.map(([k, n]) => `<option value="${k}" ${sh.cast === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <span class="sw-pill">CD <b>${8 + P + cm}</b></span>${rollBtn(d20(P + cm), "Ataque mágico", "🎯 Ataque " + sgn(P + cm))}</div>
+    <div class="sw-sub">Espaços de magia <small>quantos tem por nível · clique nas bolinhas para gastar</small></div>
+    <div class="sw-slots">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(l => { const s = sh.slots[l] || {m: 0, u: 0}; return `<div class="sw-slot"><span>${l}º</span>${num(`slots.${l}.m`, s.m || "", "tiny", 'placeholder="0"')}<div>${Array.from({length: +s.m || 0}, (_, k) => `<button class="pip ${k < (+s.u || 0) ? "" : "on"} mag" data-slot="${l}.${k}" ${dis} title="${k < (+s.u || 0) ? "Gasto" : "Disponível"}"></button>`).join("")}</div></div>`; }).join("")}</div>
+    <div class="sw-sub">Magias ${ed ? `<button class="btn small" data-add="sp_">＋ Magia</button>` : ""}</div>
+    <div class="sw-spells">${sh.sp_.map((p, i) => `<details class="sw-spell" ${p._o ? "open" : ""}><summary><b>${esc(p.n || "Magia")}</b><small>${p.l ? p.l + "º nível" : "truque"}</small>
+        ${p.atk ? rollBtn(d20(P + cm), "Ataque · " + (p.n || "magia"), "🎯 " + sgn(P + cm)) : ""}${p.f ? rollBtn(p.f, p.n || "Magia", "🎲 " + esc(p.f)) : ""}${ed && p.l > 0 ? `<button class="sw-roll" data-cast="${i}" title="Gasta um espaço de ${p.l}º nível">✨ Conjurar</button>` : ""}</summary>
+        <div class="sw-spf">${inp(`sp_.${i}.n`, p.n, "grow", 'placeholder="Nome"')}<label class="mini">nível ${num(`sp_.${i}.l`, p.l, "tiny")}</label><label class="mini" title="Dados de dano ou cura">dados ${inp(`sp_.${i}.f`, p.f, "dmg", 'placeholder="8d6"')}</label><label class="mini"><input type="checkbox" data-f="sp_.${i}.atk" ${p.atk ? "checked" : ""} ${dis}>rola ataque</label>${ed ? `<button class="sw-x" data-del="sp_.${i}" title="Apagar">✕</button>` : ""}</div>
+        <textarea data-f="sp_.${i}.d" rows="3" placeholder="O que a magia faz, alcance, duração…" ${dis}>${esc(p.d)}</textarea></details>`).join("") || `<p class="hint">Nenhuma magia. Adicione truques e magias; as que têm dados rolam com um clique.</p>`}</div>`; }
+  else if (shTab === "inv") body = `
+    <div class="sw-money">${MONEY.map(([k, s, n]) => `<label title="${n}"><span>${s}</span>${num("money." + k, sh.money[k] || "", "", 'placeholder="0"')}</label>`).join("")}</div>
+    <div class="sw-sub">Itens ${ed ? `<button class="btn small" data-add="inv">＋ Item</button>` : ""}</div>
+    <div class="sw-inv">${sh.inv.map((it, i) => `<div class="sw-item">${num(`inv.${i}.q`, it.q, "tiny", 'title="Quantidade"')}${inp(`inv.${i}.n`, it.n, "grow", 'placeholder="Corda de cânhamo (15 m)"')}${ed ? `<button class="sw-x" data-del="inv.${i}" title="Apagar">✕</button>` : ""}</div>`).join("") || `<p class="hint">Mochila vazia.</p>`}</div>`;
+  else body = `<div class="sw-sub">Traços, talentos e habilidades</div><textarea data-f="tr" rows="8" placeholder="Visão no escuro, Ataque furtivo 2d6, Fúria 3/dia…" ${dis}>${esc(sh.tr)}</textarea>
+    <div class="sw-sub">Anotações</div><textarea data-f="nt" rows="8" placeholder="História, aliados, objetivos, pistas…" ${dis}>${esc(sh.nt)}</textarea>`;
+  w.innerHTML = `<div class="sw-head" id="swDrag">
+      <span class="sw-port" style="--pc:${esc(t?.c || "#6b5a44")}">${sh.img ? `<img src="${esc(sh.img)}" alt="">` : esc((sh.n || "?").slice(0, 2).toUpperCase())}</span>
+      <div class="sw-id">${inp("n", sh.n, "sw-name", 'maxlength="40" aria-label="Nome"')}
+        <div class="sw-meta">${inp("race", sh.race, "", 'placeholder="Raça" maxlength="40"')}${inp("cls", sh.cls, "", 'placeholder="Classe" maxlength="40"')}<label>nível ${num("lvl", sh.lvl, "tiny")}</label>${isGM ? `<label>dono ${inp("o", sh.o, "", 'placeholder="apelido do jogador" maxlength="30" style="width:110px"')}</label>` : ""}</div></div>
+      <div class="sw-adv" title="Vale para as rolagens de d20 desta ficha">${[[-1, "Desv."], [0, "Normal"], [1, "Vant."]].map(([v, l]) => `<button data-adv="${v}" aria-pressed="${shAdv === v}">${l}</button>`).join("")}</div>
+      <button class="be-x" data-act="close" aria-label="Fechar ficha">✕</button></div>
+    <div class="sw-tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${shTab === k}">${l}</button>`).join("")}<span class="spacer"></span>
+      ${ed ? `<button class="btn small" data-act="link" title="${t ? "Ligada ao token " + esc(t.n || "") : "Liga esta ficha ao token selecionado no mapa"}">${t ? "🔗 " + esc(t.n || "token") : "🔗 Ligar ao token selecionado"}</button>` : ""}
+      ${ed ? `<details class="sw-more"><summary title="Mais">⋯</summary><div>${inp("img", sh.img, "", 'placeholder="Link da imagem do retrato" style="width:220px"')}${isGM || canEditSh(sh) ? `<button class="btn small danger" data-act="del">Apagar ficha</button>` : ""}</div></details>` : ""}</div>
+    <div class="sw-body">${body}</div>`;
+  const b = w.querySelector(".sw-body"); if (!fresh) b.scrollTop = keepScroll;
+  if (af && !fresh) { const el = w.querySelector(`[data-f="${af}"]`); if (el) { el.focus(); if (el.select && el.type !== "checkbox") try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } }
+  if (fresh) { w.style.left = Math.max(8, innerWidth / 2 - Math.min(760, innerWidth - 16) / 2) + "px"; w.style.top = Math.max(8, Math.min(70, innerHeight * .06)) + "px"; }
+  // mudar campos
+  const setPath = (path, v) => { const ks = path.split("."); let o = sh; for (let i = 0; i < ks.length - 1; i++) { if (o[ks[i]] == null || typeof o[ks[i]] !== "object") o[ks[i]] = /^\d+$/.test(ks[i + 1]) ? [] : {}; o = o[ks[i]]; } o[ks[ks.length - 1]] = v; };
+  const getVal = el => el.type === "checkbox" ? (el.checked ? 1 : 0) : el.classList.contains("num") ? (el.value.trim() === "" ? "" : Math.round(+el.value.replace(",", ".")) || 0) : el.value;
+  let typT = null;
+  w.oninput = e => { const el = e.target.closest("[data-f]"); if (!el || !ed) return; if (el.type === "checkbox" || el.tagName === "SELECT") return; setPath(el.dataset.f, getVal(el)); clearTimeout(typT); typT = setTimeout(() => shCommit(sh), 700); };
+  w.onchange = e => { const el = e.target.closest("[data-f]"); if (!el || !ed) return; setPath(el.dataset.f, getVal(el)); if (el.dataset.f === "pv" && +sh.pv > 0) sh.ds = {s: 0, f: 0}; clearTimeout(typT); shCommit(sh);
+    if (/^(at\.|lvl|sv\.|atk\.\d+\.(a|pr|bx|d|dm)$|cast|slots\.|sp_\.\d+\.(f|atk|l)$|img|ib|pv|pvm|insp)/.test(el.dataset.f)) setTimeout(drawSheet, 0); };
+  w.querySelectorAll("details.sw-spell").forEach((d, i) => d.ontoggle = () => { if (sh.sp_[i]) sh.sp_[i]._o = d.open; });
+  w.onclick = e => {
+    const el = e.target.closest("button"); if (!el) return; const d = el.dataset;
+    if (d.roll) { e.preventDefault(); shRoll(sh, d.roll, d.rl); return; }
+    if (d.tab) { shTab = d.tab; drawSheet(true); return; }
+    if (d.adv != null) { shAdv = +d.adv; drawSheet(); return; }
+    if (d.act === "close") return closeSheet();
+    if (!ed) return;
+    if (d.hp) { sh.pv = Math.min(+sh.pvm || 999, (+sh.pv || 0) + +d.hp); if (sh.pv > 0) sh.ds = {s: 0, f: 0}; shCommit(sh); return drawSheet(); }
+    if (d.sk) { sh.sk = sh.sk || {}; sh.sk[d.sk] = ((+sh.sk[d.sk] || 0) + 1) % 3; shCommit(sh); return drawSheet(); }
+    if (d.ds) { const k = d.ds[0], n = +d.ds[1]; sh.ds[k] = sh.ds[k] >= n ? n - 1 : n; shCommit(sh); return drawSheet(); }
+    if (d.slot) { const [l, k] = d.slot.split(".").map(Number), s = sh.slots[l]; if (!s) return; s.u = k < (+s.u || 0) ? k : k + 1; shCommit(sh); return drawSheet(); }
+    if (d.cast != null) { const p = sh.sp_[+d.cast], s = sh.slots[p.l]; if (!s || (+s.u || 0) >= (+s.m || 0)) return toast(`Sem espaços de ${p.l}º nível.`); s.u = (+s.u || 0) + 1; shCommit(sh); drawSheet(); toast(`✨ ${p.n || "Magia"}: espaço de ${p.l}º nível gasto.`, 1600); return; }
+    if (d.add) { const L = sh[d.add] = sh[d.add] || []; L.push(d.add === "atk" ? {n: "", a: "for", pr: 1, bx: 0, d: "1d8", dm: 1, t: ""} : d.add === "sp_" ? {n: "", l: 0, f: "", atk: 0, d: "", _o: true} : {n: "", q: 1}); shCommit(sh); drawSheet(); setTimeout(() => { const ins = w.querySelectorAll(`[data-f^="${d.add}.${L.length - 1}.n"]`); ins[0]?.focus(); }, 30); return; }
+    if (d.del) { const [k, i] = d.del.split("."); sh[k].splice(+i, 1); shCommit(sh); return drawSheet(); }
+    if (d.act === "death") { const r = shRoll(sh, "1d20", "Teste contra a morte"); if (!r) return; const v = r.dice[0]?.v || r.total;
+      if (v === 20) { sh.pv = 1; sh.ds = {s: 0, f: 0}; toast("⭐ 20 natural: volta com 1 de vida!"); } else if (v === 1) sh.ds.f = Math.min(3, sh.ds.f + 2); else if (v >= 10) sh.ds.s = Math.min(3, sh.ds.s + 1); else sh.ds.f = Math.min(3, sh.ds.f + 1);
+      if (sh.ds.s >= 3) toast("💚 Estabilizado!"); if (sh.ds.f >= 3) toast("💀 Três falhas…"); setTimeout(() => { shCommit(sh); drawSheet(); }, 1600); return; }
+    if (d.act === "dsreset") { sh.ds = {s: 0, f: 0}; shCommit(sh); return drawSheet(); }
+    if (d.act === "long") { sh.pv = +sh.pvm || sh.pv; sh.pvt = 0; sh.ds = {s: 0, f: 0}; for (const l in sh.slots) sh.slots[l].u = 0; shCommit(sh); drawSheet(); return toast("🌙 Descanso longo: tudo recuperado.", 1800); }
+    if (d.act === "link") { const tk = tokens.find(x => x.id === selTok && !isProp(x)); if (!tk) return toast("Selecione o token no mapa primeiro (clique nele) e depois aperte aqui.");
+      if (!isGM && !owns(tk)) return toast("Esse token não é seu.");
+      { const i = pvBar(tk); if (i >= 0 && +tk.b[i].m > 0 && +sh.pv === 10 && +sh.pvm === 10) { sh.pv = +tk.b[i].v || 0; sh.pvm = +tk.b[i].m; shCommit(sh); } }  // ficha nova: pega a vida que o token já tinha
+      if (isGM) { for (const x of tokens) if (x.sh === sh.id && x !== tk) delete x.sh; tk.sh = sh.id; save("tokens"); shSyncTokens(sh); } else { tk.sh = sh.id; tokReq({id: tk.id, sh: sh.id, who: myNick}); }
+      toast(`🔗 Ficha ligada a ${tk.n || "token"}.`); return drawSheet(); }
+    if (d.act === "del") { if (!confirm(`Apagar a ficha de “${sh.n}”? Não dá para desfazer.`)) return; sheets = sheets.filter(x => x !== sh);
+      if (isGM) { for (const x of tokens) if (x.sh === sh.id) delete x.sh; save("tokens"); shSaveGM(); send("sheet", {del: sh.id}); } else send("sheetreq", {del: sh.id, who: myNick});
+      closeSheet(); if (panelKind === "sheets") openSheetsPanel(); return; }
+  };
+  // arrastar a janela pelo topo
+  const hd = $("#swDrag"); hd.onpointerdown = e => { if (e.target.closest("input,button,select,textarea,summary")) return; const r = w.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+    const mv = ev => { w.style.left = Math.max(0, Math.min(innerWidth - 80, ev.clientX - ox)) + "px"; w.style.top = Math.max(0, Math.min(innerHeight - 50, ev.clientY - oy)) + "px"; };
+    const up = () => { removeEventListener("pointermove", mv); removeEventListener("pointerup", up); }; addEventListener("pointermove", mv); addEventListener("pointerup", up); };
+}
+function shOnRemote(sh){ // chegou uma ficha nova/alterada
+  if (!sheets) sheets = []; const i = sheets.findIndex(x => x.id === sh.id); if (i >= 0) sheets[i] = sh; else sheets.push(sh);
+  if (shOpen === sh.id) { const a = document.activeElement; if (!(a && $("#sheetWin")?.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName))) drawSheet(); }
+  if (panelKind === "sheets") openSheetsPanel();
+}
+// ---------- chat de texto (com sussurro) + histórico junto das rolagens ----------
+// linha 996 do map_state (coluna drawings): [{id, at, w, c, to, tx}] ou rolagem {id, at, w, c, rl: {l, t, f}}. O mestre grava.
+const CH_ROW = 996;
+let chatLog = [], chatOpen = false, chatUnread = 0, chatTo = "", chatLoaded = false, chatSaveT = null;
+const meName = () => isGM ? "Mestre" : (myNick || "Jogador");
+const myColor = () => { const t = tokens.find(x => !isProp(x) && owns(x) && !isGM); return t?.c || (isGM ? "#d0a54c" : "#9fb7d8"); };
+function chatSees(m){ // sussurros: só quem mandou, quem recebeu e o mestre
+  if (!m.to) return true; if (isGM) return true;
+  const me = String(myNick || "").toLowerCase(); return String(m.w || "").toLowerCase() === me || String(m.to).toLowerCase() === me;
+}
+async function chatLoad(){
+  const {data, error} = await sb.from("map_state").select("drawings").eq("id", CH_ROW).maybeSingle();
+  if (error) return; const L = Array.isArray(data?.drawings) ? data.drawings : [];
+  const ids = new Set(L.map(m => m.id)); chatLog = [...L, ...chatLog.filter(m => !ids.has(m.id))].sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-300); chatLoaded = true;
+  if (chatOpen) drawChat();
+}
+function chatSaveGM(){ if (!isGM || EDIT_ID) return; clearTimeout(chatSaveT); chatSaveT = setTimeout(async () => { await sb.from("map_state").upsert({id: CH_ROW, drawings: chatLog.slice(-300), updated_at: new Date().toISOString()}); }, 1500); }
+function chatPush(m, fromNet){
+  if (!m?.id || chatLog.some(x => x.id === m.id)) return; chatLog.push(m); if (chatLog.length > 320) chatLog.splice(0, chatLog.length - 300);
+  if (isGM) chatSaveGM();
+  if (!chatSees(m)) return;
+  if (chatOpen) drawChat(); else if (fromNet && !m.rl) { chatUnread++; drawDiceLog(); chatBubble(m); }
+}
+function chatSend(txt){
+  txt = String(txt || "").trim().slice(0, 500); if (!txt) return;
+  const cmd = /^\/(r|roll|rolar)\s+(.+)$/i.exec(txt); if (cmd) { doRoll(cmd[2]); return; }
+  const m = {id: uid(), at: Date.now(), w: meName(), c: myColor(), to: chatTo || "", tx: txt};
+  chatPush(m); send("chat", {m});
+}
+function chatRoll(r){ // rolagem que terminou: entra no histórico do chat
+  if (r.secret) return; chatPush({id: "r" + r.id, at: Date.now(), w: String(r.who || "?").slice(0, 30), c: r.col || "#d0a54c", rl: {l: String(r.label || "").slice(0, 40), t: r.total, f: String(r.f || "").slice(0, 60)}});
+}
+function chatBubble(m){
+  const b = document.createElement("div"); b.className = "chatbub"; b.innerHTML = `<b style="color:${esc(m.c || "#d0a54c")}">${esc(m.w)}</b>${m.to ? ` <i>sussurra</i>` : ""}: ${esc(m.tx).slice(0, 140)}`;
+  b.onclick = () => { b.remove(); openChat(); }; document.body.appendChild(b); setTimeout(() => b.classList.add("out"), 4200); setTimeout(() => b.remove(), 4700);
+  if (DS.init()) DS.tone(DS.ctx.currentTime, 880, .08, .05, "sine");
+}
+function openChat(){ chatOpen = true; chatUnread = 0; drawDiceLog(); drawChat(); if (!chatLoaded) chatLoad(); setTimeout(() => $("#chatIn")?.focus(), 30); }
+function closeChat(){ chatOpen = false; $("#chatBox")?.remove(); drawDiceLog(); }
+const hhmm = at => { const d = new Date(at || 0); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+function drawChat(){
+  let el = $("#chatBox"); const keepVal = $("#chatIn")?.value || "", hadFocus = document.activeElement?.id === "chatIn";
+  if (!el) { el = document.createElement("div"); el.id = "chatBox"; el.className = "chatbox"; document.body.appendChild(el); el.onpointerdown = e => e.stopPropagation(); el.onwheel = e => e.stopPropagation(); }
+  const others = [...new Set(peersOnMap.filter(n => n && n.toLowerCase() !== String(myNick || "").toLowerCase()))];
+  const targets = [["", "Todos"], ...(isGM ? [] : [["@gm", "Mestre (sussurro)"]]), ...others.map(n => [n, n + " (sussurro)"])];
+  if (chatTo && !targets.some(t => t[0] === chatTo)) targets.push([chatTo, chatTo === "@gm" ? "Mestre (sussurro)" : chatTo + " (sussurro)"]);
+  const rows = chatLog.filter(chatSees).slice(-120).map(m => m.rl
+    ? `<div class="cm roll"><span class="ct">${hhmm(m.at)}</span><b style="color:${esc(m.c)}">${esc(m.w)}</b> 🎲 ${m.rl.l ? `<i>${esc(m.rl.l)}</i> ` : ""}<span class="cf">${esc(m.rl.f)}</span> = <b class="cr">${esc(m.rl.t)}</b></div>`
+    : `<div class="cm ${m.to ? "wh" : ""}"><span class="ct">${hhmm(m.at)}</span><b style="color:${esc(m.c)}">${esc(m.w)}</b>${m.to ? ` <i class="cwh">→ ${esc(m.to === "@gm" ? "Mestre" : m.to)}</i>` : ""}: ${esc(m.tx)}</div>`).join("");
+  el.innerHTML = `<div class="cb-head"><b>💬 Chat</b><span class="spacer"></span><button class="be-x" id="chatX" aria-label="Fechar chat">✕</button></div>
+    <div class="cb-rows" id="chatRows">${rows || `<p class="hint" style="margin:8px">Nenhuma mensagem ainda. Escreva abaixo. Para rolar daqui: <b>/r 1d20+3</b></p>`}</div>
+    <form class="cb-form" id="chatForm"><select id="chatTo" aria-label="Para quem">${targets.map(([v, l]) => `<option value="${esc(v)}" ${v === chatTo ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+      <input id="chatIn" maxlength="500" autocomplete="off" placeholder="${chatTo ? "Sussurro…" : "Mensagem… ( /r 1d20 rola )"}" value="${esc(keepVal)}"><button class="btn small primary" type="submit">Enviar</button></form>`;
+  const R = $("#chatRows"); R.scrollTop = R.scrollHeight;
+  $("#chatX").onclick = closeChat;
+  $("#chatTo").onchange = e => { chatTo = e.target.value; drawChat(); $("#chatIn").focus(); };
+  const inp = $("#chatIn"); inp.onkeydown = e => { e.stopPropagation(); if (e.key === "Escape") closeChat(); };
+  $("#chatForm").onsubmit = e => { e.preventDefault(); const v = inp.value; inp.value = ""; chatSend(v); inp.focus(); };
+  if (hadFocus) inp.focus();
+}
+// ---------- backup: baixa e restaura tudo (mapas, fichas, anotações, chat, lista de sons) ----------
+async function backupDownload(){
+  const t = toast("Preparando o backup…", 8000);
+  const [m, so, fo, lv] = await Promise.all([sb.from("map_state").select("*"), sb.from("sounds").select("*"), sb.from("folders").select("*"), sb.from("live_state").select("*")]);
+  if (m.error) return toast("Não consegui ler os mapas: " + m.error.message);
+  const data = {app: "mesa-sonora", v: 1, at: new Date().toISOString(), map_state: m.data || [], sounds: so.data || [], folders: fo.data || [], live_state: lv.data || []};
+  const blob = new Blob([JSON.stringify(data)], {type: "application/json"}), a = document.createElement("a"), d = new Date();
+  a.href = URL.createObjectURL(blob); a.download = `mesa-sonora-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}.json`;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  const nm = data.map_state.filter(r => r.id >= 1000).length;
+  toast(`💾 Backup baixado: ${nm} mapa${nm === 1 ? "" : "s"} salvo${nm === 1 ? "" : "s"}, ${data.sounds.length} sons, fichas, anotações e chat.`, 4000);
+}
+function backupRestore(){
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
+  inp.onchange = async () => {
+    const f = inp.files?.[0]; if (!f) return; let data;
+    try { data = JSON.parse(await f.text()); } catch { return toast("Esse arquivo não é um backup válido."); }
+    if (data?.app !== "mesa-sonora" || !Array.isArray(data.map_state)) return toast("Esse arquivo não é um backup da Mesa Sonora.");
+    const nm = data.map_state.filter(r => r.id >= 1000).length, when = (() => { try { return new Date(data.at).toLocaleString("pt-BR"); } catch { return "?"; } })();
+    if (!confirm(`Restaurar o backup de ${when}?\n\n${nm} mapas salvos, ${(data.sounds || []).length} sons, fichas, anotações e o mapa da mesa.\n\nO que tiver o mesmo nome/número agora será substituído pelo do backup. Mapas e sons criados depois do backup continuam.`)) return;
+    toast("Restaurando…", 8000);
+    const clean = r => { const o = {...r}; delete o.created_at; return o; };
+    const ms = data.map_state.map(clean);
+    for (let i = 0; i < ms.length; i += 4) { const {error} = await sb.from("map_state").upsert(ms.slice(i, i + 4)); if (error) return toast("Parou no meio: " + error.message); }
+    if (Array.isArray(data.folders) && data.folders.length) { const {error} = await sb.from("folders").upsert(data.folders); if (error) toast("Pastas de sons: " + error.message); }
+    if (Array.isArray(data.sounds) && data.sounds.length) for (let i = 0; i < data.sounds.length; i += 50) { const {error} = await sb.from("sounds").upsert(data.sounds.slice(i, i + 50)); if (error) { toast("Sons: " + error.message); break; } }
+    send("hand", {v: Date.now()}); toast("📥 Backup restaurado. Recarregando…", 2500); setTimeout(() => location.reload(), 1600);
+  };
+  inp.click();
+}
+// ---------- som ligado ao mapa (o mestre controla daqui; os jogadores ouvem pela aba da Mesa Sonora) ----------
+// scene.snd = {m: música, a: [ambientes], auto: tocar ao abrir o mapa, c: música de combate, z: [{id, x, y, r (casas), s (ambiente)}]}
+let sndList = null, liveMap = {music: null, amb: {}}, sndChan = null, zoneOn = {}, zoneT = 0, zonePlace = null, cbtPrev;
+const SND = () => scene.snd || (scene.snd = {m: "", a: [], auto: true, c: "", z: []});
+const sndById = id => (sndList || []).find(s => s.id === id);
+const sndName = s => s ? (s.emoji ? s.emoji + " " : "") + s.name : "?";
+async function sndLoad(){
+  const [a, b] = await Promise.all([sb.from("sounds").select("id,name,kind,emoji,volume,folder"), sb.from("live_state").select("*").eq("id", 1).maybeSingle()]);
+  if (!a.error) sndList = (a.data || []).sort((x, y) => String(x.name).localeCompare(String(y.name), "pt"));
+  if (!b.error && b.data) liveMap = {music: b.data.music || null, amb: b.data.amb || {}};
+}
+async function liveSet(next){
+  liveMap = {music: next.music || null, amb: next.amb || {}};
+  const {error} = await sb.from("live_state").upsert({id: 1, music: liveMap.music, amb: liveMap.amb, updated_at: new Date().toISOString()});
+  if (error) toast("Não mudei o som: " + error.message);
+  if (panelKind === "snd") openSndPanel();
+}
+function sndMusic(sid){ const s = sndById(sid); return liveSet({...liveMap, music: s ? {sid, at: Date.now(), vol: liveMap.music?.vol ?? s.volume ?? .8} : null}); }
+function sndAmb(sid, on){ const amb = {...liveMap.amb}; if (on) amb[sid] = {at: Date.now(), vol: sndById(sid)?.volume ?? .7}; else delete amb[sid]; return liveSet({...liveMap, amb}); }
+function sndSfx(sid){ const s = sndById(sid); if (!s) return; if (!sndChan) { sndChan = sb.channel("mesa", {config: {broadcast: {self: false}}}); sndChan.subscribe(); } setTimeout(() => sndChan.send({type: "broadcast", event: "sfx", payload: {sid, vol: s.volume ?? 1}}), sndChan.state === "joined" ? 0 : 600); }
+async function sndApplyMap(){ // abriu um mapa salvo: toca a trilha dele
+  const S = scene.snd; if (!S?.auto || (!S.m && !S.a?.length)) return;
+  if (!sndList) await sndLoad();
+  const amb = {}; for (const sid of S.a || []) if (sndById(sid)) amb[sid] = {at: Date.now(), vol: sndById(sid).volume ?? .7};
+  const m = S.m && sndById(S.m) ? (liveMap.music?.sid === S.m ? liveMap.music : {sid: S.m, at: Date.now(), vol: sndById(S.m).volume ?? .8}) : null;
+  zoneOn = {}; await liveSet({music: m, amb}); toast(`🎵 Trilha do mapa: ${[m && sndName(sndById(m.sid)), ...Object.keys(amb).map(k => sndName(sndById(k)))].filter(Boolean).join(", ")}`, 2600);
+}
+async function sndCombat(start){ // começou/acabou o combate: troca a música
+  const c = scene.snd?.c || (() => { try { return localStorage.getItem("mesa.cbtsnd") || ""; } catch { return ""; } })(); if (!c) return;
+  if (!sndList) await sndLoad(); const s = sndById(c); if (!s) return;
+  if (start) { if (liveMap.music?.sid === c) return; try { localStorage.setItem("mesa.cbtprev", JSON.stringify(liveMap.music || null)); } catch {} await liveSet({...liveMap, music: {sid: c, at: Date.now(), vol: liveMap.music?.vol ?? s.volume ?? .8}}); toast(`⚔️🎵 ${sndName(s)}`, 1800); }
+  else { if (liveMap.music?.sid !== c) return; let prev = null; try { prev = JSON.parse(localStorage.getItem("mesa.cbtprev") || "null"); } catch {} await liveSet({...liveMap, music: prev ? {...prev, at: Date.now()} : null}); }
+}
+function zoneTick(){ // zonas de som: o ambiente liga quando um personagem chega perto e fica mais alto no centro
+  if (!isGM || EDIT_ID) return; const Z = scene.snd?.z; if (!Z?.length || !sndList) return;
+  const now = performance.now(); if (now - zoneT < 900) return; zoneT = now;
+  const pcs = tokens.map(t => tokLive[t.id] ? {...t, ...tokLive[t.id]} : t).filter(t => !isProp(t) && t.o && !t.h), want = {};
+  for (const z of Z) { if (!z.s || !sndById(z.s)) continue; const R = (+z.r || 4) * G().size; let d = Infinity; for (const t of pcs) d = Math.min(d, Math.hypot(t.x - z.x, t.y - z.y));
+    if (d <= R) { const base = sndById(z.s).volume ?? .7, v = Math.round(base * (1 - .75 * d / R) * 20) / 20; want[z.s] = Math.max(want[z.s] || 0, v); } }
+  const amb = {...liveMap.amb}; let ch = false;
+  for (const sid in zoneOn) if (!(sid in want)) { delete amb[sid]; delete zoneOn[sid]; ch = true; }
+  for (const sid in want) { const cur = amb[sid]; if (!cur) { amb[sid] = {at: Date.now(), vol: want[sid]}; ch = true; } else if (zoneOn[sid] && Math.abs((cur.vol ?? 0) - want[sid]) >= .05) { amb[sid] = {...cur, vol: want[sid]}; ch = true; } if (!cur || zoneOn[sid]) zoneOn[sid] = 1; }
+  if (ch) liveSet({...liveMap, amb});
+}
+function paintZones(){ // só o mestre vê as zonas
+  const Z = scene.snd?.z; if (!isGM || !Z?.length) return;
+  ctx.save(); for (const z of Z) { const R = (+z.r || 4) * G().size, on = z.s && zoneOn[z.s];
+    ctx.beginPath(); ctx.arc(z.x, z.y, R, 0, Math.PI * 2); ctx.fillStyle = on ? "rgba(95,190,160,.08)" : "rgba(95,160,190,.05)"; ctx.fill();
+    ctx.setLineDash([10 / cam.z, 8 / cam.z]); ctx.lineWidth = 2 / cam.z; ctx.strokeStyle = on ? "rgba(120,220,180,.8)" : "rgba(120,180,220,.55)"; ctx.stroke(); ctx.setLineDash([]);
+    label(z.x, z.y, `🔊 ${z.s ? sndName(sndById(z.s)) : "escolha o som"}`); }
+  ctx.restore();
+}
+async function openSndPanel(){
+  panelKind = "snd";
+  if (!sndList) { $("#panel").innerHTML = `<div class="panel"><h3>Som <button class="btn small" id="pClose">Fechar</button></h3><p class="hint">Carregando os sons…</p></div>`; $("#pClose").onclick = closePanel; await sndLoad(); if (panelKind !== "snd") return; }
+  const S = SND(), mus = sndList.filter(s => s.kind === "music"), amb = sndList.filter(s => s.kind === "ambient"), sfx = sndList.filter(s => s.kind === "sfx");
+  const opt = (L, v, none = "— nenhuma —") => `<option value="">${none}</option>` + L.map(s => `<option value="${esc(s.id)}" ${s.id === v ? "selected" : ""}>${esc(sndName(s))}</option>`).join("");
+  let cbtG = ""; try { cbtG = localStorage.getItem("mesa.cbtsnd") || ""; } catch {}
+  $("#panel").innerHTML = `<div class="panel snd-panel" role="dialog" aria-label="Som"><h3>🎵 Som da mesa<button class="btn small" id="pClose">Fechar</button></h3>
+    <p class="hint" style="margin-top:0">Os jogadores ouvem pela aba da <b>Mesa Sonora</b> (a página dos sons), que precisa estar aberta com “Entrar” clicado.</p>
+    <div class="lbl">Tocando agora</div>
+    <div class="snd-now">${liveMap.music && sndById(liveMap.music.sid) ? `<span class="snd-chip on">🎵 ${esc(sndName(sndById(liveMap.music.sid)))}<button data-stopm title="Parar">■</button></span>` : `<span class="hint">sem música</span>`}
+      ${Object.keys(liveMap.amb || {}).filter(sndById).map(k => `<span class="snd-chip on">${zoneOn[k] ? "📍" : "🌧"} ${esc(sndName(sndById(k)))}<button data-stopa="${esc(k)}" title="Parar">■</button></span>`).join("")}
+      ${liveMap.music || Object.keys(liveMap.amb || {}).length ? `<button class="btn small danger" id="sStopAll">Parar tudo</button>` : ""}</div>
+    <div class="lbl">Tocar</div>
+    <div class="snd-grid">${mus.map(s => `<button class="snd-b ${liveMap.music?.sid === s.id ? "on" : ""}" data-pm="${esc(s.id)}" title="Música (troca a que está tocando)">🎵 ${esc(s.emoji || "")} ${esc(s.name)}</button>`).join("")}
+      ${amb.map(s => `<button class="snd-b amb ${liveMap.amb?.[s.id] ? "on" : ""}" data-pa="${esc(s.id)}" title="Ambiente (liga/desliga, soma com os outros)">🌧 ${esc(s.emoji || "")} ${esc(s.name)}</button>`).join("")}
+      ${sfx.map(s => `<button class="snd-b sfx" data-px="${esc(s.id)}" title="Efeito (toca uma vez para todos)">💥 ${esc(s.emoji || "")} ${esc(s.name)}</button>`).join("") || ""}
+      ${!sndList.length ? `<p class="hint">Nenhum som ainda. Suba músicas e ambientes na página da Mesa Sonora.</p>` : ""}</div>
+    <div class="lbl">Trilha deste mapa ${scene.libName ? `<small>(${esc(scene.libName)})</small>` : ""}</div>
+    <label class="snd-f">Música <select id="sM">${opt(mus, S.m)}</select></label>
+    <div class="snd-f">Ambientes <div class="snd-amb">${amb.map(s => `<label class="chk"><input type="checkbox" data-sa="${esc(s.id)}" ${(S.a || []).includes(s.id) ? "checked" : ""}> ${esc(sndName(s))}</label>`).join("") || `<span class="hint">nenhum</span>`}</div></div>
+    <div class="acts"><label class="chk"><input type="checkbox" id="sAuto" ${S.auto !== false ? "checked" : ""}> Tocar sozinho ao abrir este mapa</label><span class="spacer"></span><button class="btn small primary" id="sPlayMap">▶ Tocar a trilha</button></div>
+    <div class="lbl">Combate</div>
+    <label class="snd-f">Música de combate <select id="sC">${opt(mus, S.c, "— a padrão —")}</select></label>
+    <label class="snd-f">Padrão (todos os mapas) <select id="sCG">${opt(mus, cbtG)}</select></label>
+    <p class="hint">Entra sozinha no “Começar combate” e, no “Encerrar combate”, volta a música que estava antes.</p>
+    <div class="lbl">Zonas de som <small>o ambiente liga quando um personagem chega perto (mais alto no centro)</small></div>
+    <div class="snd-zones">${(S.z || []).map((z, i) => `<div class="snd-z"><select data-zs="${i}">${opt(amb, z.s, "— escolha —")}</select><label class="mini">raio <input data-zr="${i}" value="${esc(z.r)}" inputmode="numeric" style="width:40px"> casas</label><button class="btn small ic" data-zgo="${i}" title="Mostrar no mapa">👁</button><button class="btn small ic" data-zmv="${i}" title="Mudar de lugar: clique no mapa">📍</button><button class="btn small ic danger" data-zdel="${i}" title="Apagar">✕</button></div>`).join("") || `<p class="hint" style="margin:0">Nenhuma. Ex.: cachoeira, fogueira, taverna, ninho de morcegos.</p>`}</div>
+    <div class="acts"><button class="btn small" id="sZoneAdd">＋ Zona de som (clique no mapa)</button></div></div>`;
+  const P = $("#panel"); $("#pClose").onclick = closePanel;
+  const sv = () => { save("scene", "merge"); dirty = true; };
+  $("#sM").onchange = e => { S.m = e.target.value; sv(); };
+  $("#sC").onchange = e => { S.c = e.target.value; sv(); };
+  $("#sCG").onchange = e => { try { localStorage.setItem("mesa.cbtsnd", e.target.value); } catch {} };
+  $("#sAuto").onchange = e => { S.auto = e.target.checked; sv(); };
+  $("#sPlayMap").onclick = () => { if (!S.m && !S.a?.length) return toast("Escolha a música ou os ambientes deste mapa primeiro."); const a = S.auto; S.auto = true; sndApplyMap(); S.auto = a; };
+  const sa = $("#sStopAll"); if (sa) sa.onclick = () => { zoneOn = {}; liveSet({music: null, amb: {}}); };
+  $("#sZoneAdd").onclick = () => { zonePlace = {add: true}; toast("Clique no mapa onde fica o som (Esc cancela).", 2600); };
+  P.onchange = e => { const d = e.target.dataset;
+    if (d.sa) { S.a = (S.a || []).filter(x => x !== d.sa); if (e.target.checked) S.a.push(d.sa); sv(); }
+    if (d.zs != null) { S.z[+d.zs].s = e.target.value; sv(); }
+    if (d.zr != null) { S.z[+d.zr].r = Math.max(1, Math.min(40, +e.target.value || 4)); sv(); } };
+  P.onkeydown = e => e.stopPropagation();
+  P.onclick = e => { const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
+    if (d.pm) sndMusic(liveMap.music?.sid === d.pm ? "" : d.pm);
+    else if (d.pa) sndAmb(d.pa, !liveMap.amb?.[d.pa]);
+    else if (d.px) { sndSfx(d.px); b.classList.add("on"); setTimeout(() => b.classList.remove("on"), 400); }
+    else if (d.stopm != null) sndMusic("");
+    else if (d.stopa) { delete zoneOn[d.stopa]; sndAmb(d.stopa, false); }
+    else if (d.zgo != null) { const z = S.z[+d.zgo]; centerOn(z.x, z.y, Math.max(cam.z, .5)); }
+    else if (d.zmv != null) { zonePlace = {i: +d.zmv}; toast("Clique no mapa no novo lugar do som.", 2400); }
+    else if (d.zdel != null) { const z = S.z.splice(+d.zdel, 1)[0]; if (z?.s && zoneOn[z.s]) { delete zoneOn[z.s]; sndAmb(z.s, false); } sv(); openSndPanel(); } };
+}
+function zonePlaceAt(wx, wy){ // clique no mapa colocando/movendo uma zona
+  const S = SND(); S.z = S.z || [];
+  if (zonePlace.add) { const amb = (sndList || []).filter(s => s.kind === "ambient"); S.z.push({id: uid(), x: Math.round(wx), y: Math.round(wy), r: 4, s: amb[0]?.id || ""}); }
+  else if (S.z[zonePlace.i]) { S.z[zonePlace.i].x = Math.round(wx); S.z[zonePlace.i].y = Math.round(wy); }
+  zonePlace = null; save("scene"); dirty = true; if (panelKind === "snd") openSndPanel();
+}
+// ---------- tutorial rápido (jogador, na primeira vez) e ajuda (botão ?) ----------
+const TUT_P = [
+  ["🗺️", "Bem-vindo à mesa!", "Este é o mapa da sessão. <b>Arraste</b> para olhar em volta e use a <b>roda do mouse</b> (ou pinça no celular) para o zoom. O mestre pode trazer sua tela para onde a ação está."],
+  ["🧙", "Seu personagem", "O seu token tem o nome em <b>amarelo</b>. Clique nele para selecionar e depois <b>clique numa casa</b> para andar até lá. <b>Q</b> e <b>E</b> giram. Para abrir uma porta, chegue perto e clique nela."],
+  ["🎲", "Dados", "<b>Rolar dados</b> abre a mesa de dados. A barra de atalhos ao lado rola com um clique (clique direito edita). Todo mundo vê as rolagens no <b>Histórico</b>."],
+  ["📜", "Sua ficha", "O botão de ficha na barra da esquerda abre a ficha do seu personagem. <b>Clique nos números</b> (atributos, perícias, ataques, magias) para rolar direto. Ligue a ficha ao seu token para a vida acompanhar."],
+  ["💬", "Conversar", "<b>Entrar na voz</b> liga o microfone. O <b>💬 Chat</b> (ou a tecla Enter) serve para escrever, e dá para mandar <b>sussurro</b> só para o mestre. No chat, <b>/r 1d20+3</b> rola dados."],
+  ["⚔️", "Combate", "Quando o mestre começar o combate, a ordem aparece no topo. No seu turno aparece <b>“Seu turno!”</b>; o 🥾 mostra quanto você já andou, e <b>Terminar meu turno</b> passa a vez. Condições (envenenado, caído…) aparecem em volta do token."],
+  ["🔊", "Som", "Músicas e efeitos tocam na aba da <b>Mesa Sonora</b> (a página inicial do site). Deixe ela aberta com “Entrar” clicado. Pronto, boa sessão!"],
+];
+const HELP_GM = [
+  ["Mapa", "Arrastar move a visão · roda = zoom · 0 enquadra · Alt+clique faz um ping (Alt+Shift leva todos até lá) · Ctrl+Z/Ctrl+Y desfaz/refaz."],
+  ["Tokens", "Duplo clique ou clique direito edita · Q/E giram · barra de baixo: condições, ficha, ocultar · ✎ ao lado das barrinhas edita vida etc."],
+  ["Paredes (W)", "Parede, porta, secreta, “Ocultar trecho” (vira passagem secreta), círculo, apagar. Clique numa porta com Mover para abrir/fechar e trancar."],
+  ["Combate", "Iniciativa (⚔) → Começar combate. O deslocamento por turno é contado (🥾) e as condições descem sozinhas no turno do token."],
+  ["Fichas", "Botão de ficha: crie para cada personagem, defina o dono (apelido do jogador) e ligue ao token. Os jogadores editam as deles."],
+  ["Som", "Botão 🎵: toque músicas/ambientes/efeitos, defina a trilha de cada mapa, a música de combate e zonas de som que ligam quando alguém chega perto."],
+  ["Chat", "Enter abre. Escolha “sussurro” para falar só com um jogador. Você vê todos os sussurros."],
+  ["Backup", "Mapas salvos → 💾 Backup baixa tudo num arquivo; 📥 Restaurar volta. Faça antes de mudanças grandes."],
+];
+function openHelp(step){
+  $("#tutBox")?.remove(); const el = document.createElement("div"); el.id = "tutBox"; el.className = "tutbox"; el.setAttribute("role", "dialog");
+  document.body.appendChild(el); el.onpointerdown = e => e.stopPropagation();
+  const close = () => { el.remove(); try { localStorage.setItem("mesa.tut1", "1"); } catch {} };
+  if (isGM) {
+    el.innerHTML = `<div class="tut-card wide"><div class="tut-h"><b>Ajuda do mestre</b><button class="be-x" data-x aria-label="Fechar">✕</button></div>
+      <dl class="tut-list">${HELP_GM.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>
+      <div class="acts"><span class="hint">Os jogadores veem um tutorial rápido na primeira vez que entram.</span><span class="spacer"></span><button class="btn small" data-demo>Ver o tutorial dos jogadores</button><button class="btn small primary" data-x>Fechar</button></div></div>`;
+    el.onclick = e => { if (e.target.closest("[data-x]") || e.target === el) close(); if (e.target.closest("[data-demo]")) { el.remove(); tutPlayer(0); } };
+    return;
+  }
+  tutPlayer(step || 0);
+}
+function tutPlayer(i){
+  $("#tutBox")?.remove(); const el = document.createElement("div"); el.id = "tutBox"; el.className = "tutbox"; document.body.appendChild(el); el.onpointerdown = e => e.stopPropagation();
+  const close = () => { el.remove(); try { localStorage.setItem("mesa.tut1", "1"); } catch {} };
+  const draw = () => { const [ic, h, tx] = TUT_P[i];
+    el.innerHTML = `<div class="tut-card"><div class="tut-ic">${ic}</div><b class="tut-t">${h}</b><p>${tx}</p>
+      <div class="tut-dots">${TUT_P.map((_, k) => `<i class="${k === i ? "on" : ""}"></i>`).join("")}</div>
+      <div class="acts"><button class="btn small" data-skip>${i === TUT_P.length - 1 ? "Fechar" : "Pular"}</button><span class="spacer"></span>${i ? `<button class="btn small" data-prev>Voltar</button>` : ""}<button class="btn small primary" data-next>${i === TUT_P.length - 1 ? "Vamos jogar!" : "Próximo"}</button></div></div>`; };
+  el.onclick = e => { if (e.target.closest("[data-skip]")) return close(); if (e.target.closest("[data-prev]")) { i = Math.max(0, i - 1); draw(); } if (e.target.closest("[data-next]")) { if (i >= TUT_P.length - 1) return close(); i++; draw(); } };
+  el.onkeydown = e => { e.stopPropagation(); if (e.key === "Escape") close(); if (e.key === "ArrowRight" || e.key === "Enter") el.querySelector("[data-next]").click(); if (e.key === "ArrowLeft") el.querySelector("[data-prev]")?.click(); };
+  draw(); el.tabIndex = -1; el.focus();
+}
 // ---------- barrinhas: botão ✎ ao lado delas no mapa e edição grande em cima do token ----------
 let barBtn = null, barEdId = null, barAdd = false;
 const BAR_COLORS = ["#c0473a", "#3b6fc9", "#3fae4a", "#d0a54c", "#8a5bb0", "#e07b2e", "#4ab8b0", "#e8e2d0"];
@@ -2457,7 +3011,7 @@ function barSave(t, whole){ // mestre salva; jogador pede ao mestre
   if (isGM) { save("tokens"); return; }
   tokReq({id: t.id, bars: (t.b || []).map(b => ({n: b.n || "", v: b.v, m: b.m, c: b.c})), who: myNick});
 }
-function barSet(t, i, v){ const b = t.b?.[i]; if (!b) return; const m = +b.m; v = Math.round(v); if (m > 0) v = Math.max(-999, Math.min(v, m * 3)); b.v = v; barSave(t); drawBarEd(); }
+function barSet(t, i, v){ const b = t.b?.[i]; if (!b) return; const m = +b.m; v = Math.round(v); if (m > 0) v = Math.max(-999, Math.min(v, m * 3)); b.v = v; barSave(t); shFromTokenPV(t, i); drawBarEd(); }
 function openBarEd(t){ barEdId = t.id; barAdd = !barsOf(t).length; drawBarEd(); }
 function closeBarEd(){ barEdId = null; barAdd = false; $("#barEd")?.remove(); dirty = true; }
 function drawBarEd(){
@@ -2724,6 +3278,7 @@ cv.addEventListener("pointerdown", e => {
   const [wx, wy] = toWorld(e.clientX, e.clientY);
   if (e.button === 0 && e.altKey) { doPing(wx, wy, isGM && e.shiftKey); if (isGM && e.shiftKey) send("view", {x: wx, y: wy, z: cam.z}); return; }
   if (e.button === 0) lastClick = [wx, wy];
+  if (e.button === 0 && isGM && zonePlace) { zonePlaceAt(wx, wy); return; }
   if (e.button === 2 && tool === "wall" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (e.button === 1 || e.button === 2 || spaceDown) { drag = {kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y}; cv.classList.add("panning"); return; }
   if (barBtn && e.button === 0) { const q = 3 / cam.z; if (wx >= barBtn.x - q && wx <= barBtn.x + barBtn.s + q && wy >= barBtn.y - q && wy <= barBtn.y + barBtn.s + q) { const bt = tokens.find(x => x.id === barBtn.id); if (bt) barEdId === bt.id ? closeBarEd() : openBarEd(bt); dirty = true; return; } }
@@ -2766,6 +3321,10 @@ cv.addEventListener("pointerdown", e => {
   if (tool === "erase") { eraseAt(wx, wy); drag = {kind: "erase"}; return; }
   if (tool === "wall") {
     if (opt.wall === "erase") { const i = wallAt(wx, wy); if (i >= 0) { walls().splice(i, 1); wallsChanged(); } return; }
+    if (opt.wall === "hide") { // ocultar trecho: vira passagem secreta (clique numa passagem secreta para voltar a ser parede)
+      const i = wallAt(wx, wy), w = walls()[i]; if (!w || !w.p) return;
+      if (w.d) { if (w.s) { delete w.s; delete w.o; delete w.lk; w.d = 0; wallsChanged(); toast("Voltou a ser parede comum.", 1600); } else toast("Isso é uma porta. Clique numa parede.", 1600); return; }
+      const h = hideRange(w, wx, wy); drag = {kind: "wallhide", w, a: h, b: h}; dirty = true; return; }
     if (!wallDraft) { // pegou numa junção? arrasta
       const h = handleAt(wx, wy);
       if (h) {
@@ -2828,6 +3387,7 @@ cv.addEventListener("pointermove", e => {
   if (drag.kind === "ruler") { rulers[myKey].b = snapPoint(wx, wy); dirty = true; sendRuler(); return; }
   if (drag.kind === "draw") { const p = [Math.round(wx), Math.round(wy)], s = drag.shape; if (s.t === "pen") { const l = s.p[s.p.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 2 / cam.z) s.p.push(p); } else s.p[1] = p; dirty = true; return; }
   if (drag.kind === "erase") { eraseAt(wx, wy); return; }
+  if (drag.kind === "wallhide") { drag.b = hideRange(drag.w, wx, wy); dirty = true; return; }
   if (drag.kind === "wallcircle") { drag.r = Math.hypot(wx - drag.c[0], wy - drag.c[1]); dirty = true; return; }
   if (drag.kind === "wallpt") { const skip = drag.pts.length === 1 ? drag.pts[0][0] : null; const p = snapWall(wx, wy, e.shiftKey, skip); for (const [w, i] of drag.pts) { w.p[i * 2] = p[0]; w.p[i * 2 + 1] = p[1]; } drag.moved = true; wallsVer++; dirty = true; return; }
   if (drag.kind === "wallcirc") { const w = drag.w; if (drag.mode === "c") w.c = e.shiftKey ? [Math.round(wx), Math.round(wy)] : snapWall(wx, wy, false); else w.r = Math.max(4, Math.hypot(wx - w.c[0], wy - w.c[1])); drag.moved = true; wallsVer++; dirty = true; return; }
@@ -2843,7 +3403,7 @@ function endPointer(e){
     const t = tokens.find(x => x.id === d.walk.id); if (!t) return;
     const P = pathTo(t, d.walk.c);
     if (P && P.length > 1) walkTo(t, P);
-    else if (!P) { toast(isGM ? "Longe demais." : "Não dá para chegar lá (parede ou longe demais)."); }
+    else if (!P) { toast(isGM ? "Longe demais." : inCombat(t) && moveLim(t) <= 0 ? "Você já usou todo o deslocamento neste turno." + (t.dash ? "" : " (🏃 Disparada dobra.)") : "Não dá para chegar lá (parede ou longe demais)."); }
     else { selTok = null; hoverCell = null; dirty = true; }
     return;
   }
@@ -2860,6 +3420,7 @@ function endPointer(e){
     if (d.moved) {
       const [x, y] = d.grid ? [d.t.x, d.t.y] : d.t.sn === false ? [Math.round(d.t.x), Math.round(d.t.y)] : snapPoint(d.t.x, d.t.y, d.t.s || 1);
       d.t.x = x; d.t.y = y; delete tokLive[d.t.id];
+      if (isGM && (x !== d.ox || y !== d.oy)) { const a0 = cellAt(d.ox, d.oy), a1 = cellAt(x, y); moveSpent(d.t, d.grid ? d.path.length - 1 : cellDist(a0[0], a0[1], a1[0], a1[1])); }
       if (isGM) { if (x !== d.ox || y !== d.oy) pushTrail(d.t, d.grid ? [[d.ox, d.oy], ...d.path.slice(1).map(c => cellCenter(...c))] : [[d.ox, d.oy], [x, y]]); send("tok", {id: d.t.id, x, y}); save("tokens"); }
       else if (x !== d.ox || y !== d.oy) tokReq({id: d.t.id, x, y, who: myNick, path: [[d.ox, d.oy], ...d.path.slice(1).map(c => cellCenter(...c).map(v => Math.round(v * 10) / 10))]});
     }
@@ -2868,6 +3429,9 @@ function endPointer(e){
   if (d.kind === "ruler") { const rl = rulers[myKey]; setTimeout(() => { if (rulers[myKey] === rl) { delete rulers[myKey]; dirty = true; sendRuler(); } }, 2500); return; }
   if (d.kind === "draw") { const s = d.shape; if (s.p.length > 1 && (s.t === "pen" || Math.hypot(s.p[1][0] - s.p[0][0], s.p[1][1] - s.p[0][1]) > 3)) { drawings.push(s); save("drawings"); } dirty = true; return; }
   if (d.kind === "erase") { if (d.changed) save("drawings"); return; }
+  if (d.kind === "wallhide") { const ws = walls(), i = ws.indexOf(d.w); if (i < 0) return; const {L, a, b, pa, pb} = hideSeg(d), [x1, y1, x2, y2] = d.w.p, rest = {...d.w}; delete rest.p;
+    const parts = []; if (a > 1) parts.push({...rest, p: [x1, y1, ...pa]}); parts.push({p: [...pa, ...pb], d: 1, o: 0, s: 1}); if (L - b > 1) parts.push({...rest, p: [...pb, x2, y2]});
+    ws.splice(i, 1, ...parts); wallsChanged(); toast("Trecho oculto: vira passagem secreta. Os jogadores veem parede até você abrir (Mover → clique nela).", 3200); dirty = true; return; }
   if (d.kind === "wallcircle") { if (d.r > 3) { walls().push({c: d.c, r: Math.round(d.r * 10) / 10}); wallsChanged(); } dirty = true; return; }
   if (d.kind === "wallpt") { if (d.moved) wallsChanged(); else if (opt.wall !== "circle") { wallDraft = d.from; hoverWall = d.from; dirty = true; } return; }
   if (d.kind === "wallcirc") { if (d.moved) wallsChanged(); return; }
@@ -2891,6 +3455,8 @@ addEventListener("keydown", e => {
   if (e.ctrlKey || e.metaKey) return;
   if (k === "enter" && wallDraft) { wallDraft = null; dirty = true; return; }
   if (k === "escape" && wallDraft) { wallDraft = null; dirty = true; return; }
+  if (k === "escape" && zonePlace) { zonePlace = null; toast("Cancelado.", 1000); return; }
+  if (k === "enter" && !diceModal) { e.preventDefault(); return openChat(); }
   if (k === "escape" && diceModal) { closeDiceModal(); return; }
   if (k === "escape" && barEdId) { closeBarEd(); return; }
   if (k === "escape" && selTok) { selTok = null; hoverCell = null; dirty = true; return; }
@@ -3014,9 +3580,9 @@ addEventListener("resize", () => fitTools());
 function drawTools(){
   const btn = (t, icon, label, key) => `<button class="tool" data-tool="${t}" aria-pressed="${tool === t}" title="${label} (${key.toUpperCase()})" aria-label="${label}">${icon}<span class="k">${key.toUpperCase()}</span></button>`;
   $("#tools").innerHTML = btn("move", I.move, isGM ? "Mover tokens e o mapa" : "Mover o mapa", "v") + btn("ruler", I.ruler, "Régua", "r") + btn("spell", I.spell, "Áreas de magia", "m")
-    + (!isGM ? `<hr><button class="tool" id="pMaps" title="Mapas que o mestre liberou" aria-label="Mapas">${I.maps}<i class="tdot" hidden></i></button><button class="tool" id="pNotes" title="Anotações: o que o mestre liberou e as suas notas" aria-label="Anotações">${I.notes}<i class="tdot" hidden></i></button>` : "")
+    + (!isGM ? `<hr><button class="tool" id="pMaps" title="Mapas que o mestre liberou" aria-label="Mapas">${I.maps}<i class="tdot" hidden></i></button><button class="tool" id="pNotes" title="Anotações: o que o mestre liberou e as suas notas" aria-label="Anotações">${I.notes}<i class="tdot" hidden></i></button><button class="tool" id="pSheets" title="Ficha do seu personagem" aria-label="Ficha">${I.sheet}</button>` : "")
     + (isGM ? btn("draw", I.draw, "Desenhar e marcar áreas", "d") + btn("erase", I.erase, "Borracha (apaga desenhos)", "e") + btn("fog", I.fog, "Névoa de guerra", "f") + btn("wall", I.wall, "Paredes e portas (bloqueiam luz e visão)", "w")
-      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="iniBtn" title="Iniciativa e turnos" aria-label="Iniciativa">${I.swords}</button><button class="tool" id="handBtn" title="Anotações, mapas e imagens (libere para os jogadores ou mostre na tela deles)" aria-label="Anotações">${I.notes}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
+      + `<hr><button class="tool" id="addTok" title="Adicionar token" aria-label="Adicionar token">${I.token}</button><button class="tool" id="listTok" title="Lista de tokens" aria-label="Lista de tokens">${I.list}</button><button class="tool" id="assetsBtn" title="Assets: árvores, casas, animais, baús…" aria-label="Assets">${I.box}</button><button class="tool" id="genBtn" title="Gerador de cenários: masmorra, caverna, floresta, vila, taverna, cemitério" aria-label="Gerador de cenários">${I.dungeon}</button><button class="tool" id="mapsBtn" title="Mapas salvos (pastas)" aria-label="Mapas salvos">${I.maps}</button><button class="tool" id="iniBtn" title="Iniciativa e turnos" aria-label="Iniciativa">${I.swords}</button><button class="tool" id="sheetsBtn" title="Fichas de personagem" aria-label="Fichas">${I.sheet}</button><button class="tool" id="sndBtn" title="Som: trilha do mapa, música de combate e zonas de som" aria-label="Som">${I.music}</button><button class="tool" id="handBtn" title="Anotações, mapas e imagens (libere para os jogadores ou mostre na tela deles)" aria-label="Anotações">${I.notes}</button><button class="tool" id="sceneBtn" title="Mapa e grid" aria-label="Configurar mapa e grid">${I.gear}</button>` : "");
   $("#tools").onclick = e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.tool) setTool(b.dataset.tool);
@@ -3026,6 +3592,8 @@ function drawTools(){
     else if (b.id === "genBtn") panelKind === "gen" ? closePanel() : openGenPanel();
     else if (b.id === "mapsBtn") panelKind === "maps" ? closePanel() : openMapsPanel();
     else if (b.id === "iniBtn") panelKind === "ini" ? closePanel() : openIniPanel();
+    else if (b.id === "sndBtn") panelKind === "snd" ? closePanel() : openSndPanel();
+    else if (b.id === "sheetsBtn" || b.id === "pSheets") { if (panelKind === "sheets") closePanel(); else if (!isGM && !$("#sheetWin")) { const mine = (sheets || []).filter(canEditSh); if (mine.length === 1) openSheet(mine[0].id); else openSheetsPanel(); } else openSheetsPanel(); }
     else if (b.id === "handBtn") panelKind === "hand" ? closePanel() : openHandPanel();
     else if (b.id === "pMaps" || b.id === "pNotes") { b.querySelector(".tdot").hidden = true; if (panelKind === "hand" && handTab === (b.id === "pMaps" ? "mapa" : "nota")) closePanel(); else openHandPanel(b.id === "pMaps" ? "mapa" : "nota"); }
     else if (b.id === "sceneBtn") panelKind === "scene" ? closePanel() : openScenePanel();
@@ -3041,7 +3609,9 @@ function drawTop(){
     ${!isGM ? `<button class="btn" id="lookBtn" aria-pressed="${lookMouse}" title="Seu personagem olha para onde o mouse está">🧭 Olhar p/ mouse</button>` : ""}
     ${isGM ? `<button class="btn" id="turnBtn" title="Apaga os rastros de todos (começo de um novo turno)">⟳ Novo turno</button>` : ""}
     ${isGM ? `<button class="btn" id="castBtn" title="Faz a tela dos jogadores ir para onde você está olhando">${I.cast} Levar jogadores aqui</button>` : ""}
+    <button class="btn small" id="helpBtn" title="Ajuda e tutorial" aria-label="Ajuda">?</button>
     <div class="zoom"><button class="btn small" id="zOut" aria-label="Diminuir zoom">${I.minus}</button><span>${Math.round(cam.z * 100)}%</span><button class="btn small" id="zIn" aria-label="Aumentar zoom">${I.plus}</button><button class="btn small" id="zFit" title="Enquadrar o mapa (0)" aria-label="Enquadrar">${I.fit}</button></div>`;
+  $("#helpBtn").onclick = () => openHelp();
   $("#zOut").onclick = () => zoomAt(1 / 1.2); $("#zIn").onclick = () => zoomAt(1.2); $("#zFit").onclick = fit;
   const ls = $("#lightSeg"); if (ls) ls.onclick = e => { const b = e.target.closest("[data-light]"); if (!b) return; scene.light = b.dataset.light; save("scene"); dirty = true; drawTop(); };
   const pb = $("#prevBtn"); if (pb) pb.onclick = () => { gmPreview = !gmPreview; dirty = true; drawTop(); if (gmPreview && !tokens.some(t => VI(t) && t.o)) toast("Nenhum token de jogador tem visão ainda (aba “Visão e luz” do token)."); };
@@ -3095,8 +3665,8 @@ function openFlyout(kind){
     $("#spSh").onclick = e => { const b = e.target.closest("[data-sh]"); if (!b) return; spellCustom = {...curSpell(), sh: b.dataset.sh, wd: b.dataset.sh === "line" ? 1.5 : undefined}; openFlyout("spell"); };
   } else if (kind === "wall") {
     f.innerHTML = `<div class="flyout" style="top:${Math.max(10, top - 60)}px"><h4>Paredes e portas</h4>
-      <div class="seg" id="wMode" style="margin-bottom:10px"><button data-wm="wall" aria-pressed="${opt.wall === "wall"}">${I.wall} Parede</button><button data-wm="door" aria-pressed="${opt.wall === "door"}">${I.door} Porta</button><button data-wm="secret" aria-pressed="${opt.wall === "secret"}" title="Os jogadores não veem a porta: parece parede até você abrir">${I.door} Secreta</button><button data-wm="circle" aria-pressed="${opt.wall === "circle"}">${I.circle} Círculo</button><button data-wm="erase" aria-pressed="${opt.wall === "erase"}">${I.erase} Apagar</button></div>
-      <p class="hint">${opt.wall === "erase" ? "Clique numa parede ou porta para apagar." : opt.wall === "circle" ? "Clique no centro e arraste até o tamanho (bom para troncos de árvore e colunas). Depois dá para arrastar o ponto amarelo (mover) e o azul (tamanho)." : opt.wall === "door" ? "Clique no começo e no fim da porta. Depois, com a ferramenta Mover (V), clique na porta para abrir ou fechar." : opt.wall === "secret" ? "Porta secreta (roxa): para os jogadores é parede até você abrir. Clique no começo e no fim; abra e feche com Mover (V)." : "Clique ponto a ponto para desenhar a parede. Enter, Esc ou botão direito terminam. Os pontos grudam nos cantos da grid; segure Shift para soltar. Arraste uma junção (ponto amarelo) para deformar a parede."}</p>
+      <div class="seg" id="wMode" style="margin-bottom:10px"><button data-wm="wall" aria-pressed="${opt.wall === "wall"}">${I.wall} Parede</button><button data-wm="door" aria-pressed="${opt.wall === "door"}">${I.door} Porta</button><button data-wm="secret" aria-pressed="${opt.wall === "secret"}" title="Os jogadores não veem a porta: parece parede até você abrir">${I.door} Secreta</button><button data-wm="hide" aria-pressed="${opt.wall === "hide"}" title="Clique (ou arraste) em cima de uma parede: aquele trecho vira passagem secreta">${I.eye} Ocultar trecho</button><button data-wm="circle" aria-pressed="${opt.wall === "circle"}">${I.circle} Círculo</button><button data-wm="erase" aria-pressed="${opt.wall === "erase"}">${I.erase} Apagar</button></div>
+      <p class="hint">${opt.wall === "erase" ? "Clique numa parede ou porta para apagar." : opt.wall === "hide" ? "Clique numa parede para transformar aquele quadrado em passagem secreta (arraste ao longo da parede para pegar mais quadrados). Para os jogadores continua parecendo parede até você abrir com Mover (V). Clique numa passagem secreta para ela voltar a ser parede." : opt.wall === "circle" ? "Clique no centro e arraste até o tamanho (bom para troncos de árvore e colunas). Depois dá para arrastar o ponto amarelo (mover) e o azul (tamanho)." : opt.wall === "door" ? "Clique no começo e no fim da porta. Depois, com a ferramenta Mover (V), clique na porta para abrir ou fechar." : opt.wall === "secret" ? "Porta secreta (roxa): para os jogadores é parede até você abrir. Clique no começo e no fim; abra e feche com Mover (V)." : "Clique ponto a ponto para desenhar a parede. Enter, Esc ou botão direito terminam. Os pontos grudam nos cantos da grid; segure Shift para soltar. Arraste uma junção (ponto amarelo) para deformar a parede."}</p>
       <p class="hint" style="margin-top:6px"><b>Ctrl+Z</b> desfaz, <b>Ctrl+Y</b> refaz.</p>
       <p class="hint" style="margin-top:6px">Paredes bloqueiam a luz e a visão dos jogadores. Só você vê as linhas.</p>
       <div class="row" style="margin:10px 0 0"><button class="btn small danger" id="wClear">Apagar todas as paredes</button></div></div>`;
@@ -3493,7 +4063,9 @@ function drawDiceLog(fresh){
   el.classList.toggle("closed", !logOpen);
   const last = diceLog[diceLog.length - 1];
   const head = `<button class="dlog-tog" id="logTog" aria-expanded="${logOpen}" title="${logOpen ? "Esconder" : "Mostrar"} o histórico de rolagens">🎲 Histórico${diceLog.length ? ` <small>${diceLog.length}</small>` : ""}${!logOpen && logUnseen ? `<b class="dnew">${logUnseen}</b>` : ""}${!logOpen && last && !last.fresh ? `<span class="dlast">${esc(last.who)}: <b>${last.total}</b></span>` : ""}<span class="chev">${logOpen ? "▾" : "▸"}</span></button>`;
-  el.innerHTML = head + (logOpen ? `<div class="dlog-rows">${diceLog.slice(-6).map(logRow).join("")}</div>` : "");
+  const chatB = `<button class="dlog-tog" id="chatTog" aria-pressed="${chatOpen}" title="Chat de texto (sussurros também) · atalho: Enter">💬 Chat${chatUnread ? `<b class="dnew">${chatUnread}</b>` : ""}</button>`;
+  el.innerHTML = `<div class="dlog-head">${head}${chatB}</div>` + (logOpen ? `<div class="dlog-rows">${diceLog.slice(-6).map(logRow).join("")}</div>` : "");
+  $("#chatTog").onclick = () => chatOpen ? closeChat() : openChat();
   $("#logTog").onclick = () => { logOpen = !logOpen; logUnseen = 0; try { localStorage.setItem("mesa.logopen", logOpen ? "1" : "0"); } catch {} drawDiceLog(); };
   const rows = el.querySelector(".dlog-rows"); if (rows) rows.scrollTop = rows.scrollHeight;
 }
@@ -3571,7 +4143,7 @@ function openDiceModal(focus){
 }
 addEventListener("keydown", e => { if (e.key === "Escape" && diceModal) { e.preventDefault(); closeDiceModal(); } }, true);
 function closeDiceModal(){ diceModal = false; $("#diceModal")?.remove(); }
-const MAP_VER = 16;
+const MAP_VER = 17;
 function newVersion(){ if ($("#verBanner")) return; const b = document.createElement("div"); b.id = "verBanner"; b.className = "toast"; b.style.bottom = "auto"; b.style.top = "64px"; b.innerHTML = "Tem uma versão nova do mapa. Aperte <b>Ctrl + F5</b> para atualizar."; document.body.appendChild(b); }
 const stageQ = []; let stageBusy = false;
 function addRoll(r, mine){
@@ -3581,7 +4153,7 @@ function addRoll(r, mine){
   stageQ.push(r); if (!stageBusy) nextStage();
 }
 function finishRoll(r){
-  r.fresh = false; diceLog.push(r); if (diceLog.length > 50) diceLog.shift(); drawDiceLog(true);
+  r.fresh = false; diceLog.push(r); if (diceLog.length > 50) diceLog.shift(); drawDiceLog(true); chatRoll(r);
   if (diceModal && r.mine) openDiceModal("keep");
 }
 function nextStage(){
@@ -3675,6 +4247,8 @@ async function boot(){
   if (!isGM && !myNick) await askNick();
   $("#gate").hidden = true;
   fit();
+  if (!isGM && !EDIT_ID) { let seen = false; try { seen = localStorage.getItem("mesa.tut1") === "1"; } catch {} if (!seen) setTimeout(() => tutPlayer(0), 900); }
+  if (!isGM && cam.z < (innerWidth < 700 ? .6 : .35)) { const mt = tokens.find(t => !isProp(t) && owns(t)); if (mt) centerOn(mt.x, mt.y, innerWidth < 700 ? .9 : .8); }  // tela pequena: começa no seu personagem
   let reloadT = null;
   sb.channel("mapa-db").on("postgres_changes", {event: "*", schema: "public", table: "map_state", filter: "id=eq." + ROW}, () => { clearTimeout(reloadT); reloadT = setTimeout(load, 80); }).subscribe();
   if (EDIT_ID) { // editando em outra aba: não entra na sala dos jogadores
@@ -3717,6 +4291,24 @@ async function boot(){
     if (isGM || !p?.item) return; if (p.to !== "*" && String(p.to || "").toLowerCase() !== String(myNick || "").toLowerCase()) return;
     showHandout(p.item, true);
   });
+  chan.on("broadcast", {event: "chat"}, ({payload: p}) => { const m = p?.m; if (!m?.id || typeof m.tx !== "string") return;
+    chatPush({id: String(m.id).slice(0, 20), at: Date.now(), w: String(m.w || "?").slice(0, 30), c: /^#[0-9a-f]{6}$/i.test(m.c || "") ? m.c : "#9fb7d8", to: String(m.to || "").slice(0, 30), tx: m.tx.slice(0, 500)}, true); });
+  chan.on("broadcast", {event: "sheet"}, ({payload: p}) => { // mestre mudou uma ficha
+    if (isGM || !p) return; if (p.del) { sheets = (sheets || []).filter(x => x.id !== p.del); if (shOpen === p.del) closeSheet(); if (panelKind === "sheets") openSheetsPanel(); return; }
+    if (p.sh?.id) shOnRemote(p.sh);
+  });
+  chan.on("broadcast", {event: "sheetreq"}, ({payload: p}) => { // jogador mudou a própria ficha: o mestre confere e salva
+    if (!isGM || !p || !sheets) return; const who = String(p.who || "").toLowerCase(); if (!who) return;
+    const mineOf = sh => !!sh?.o && (sh.o === "*" || sh.o.toLowerCase() === who);
+    if (p.del) { const sh = shById(String(p.del)); if (!mineOf(sh)) return; sheets = sheets.filter(x => x !== sh); for (const x of tokens) if (x.sh === sh.id) delete x.sh; save("tokens"); shSaveGM(); send("sheet", {del: sh.id}); if (shOpen === sh.id) closeSheet(); if (panelKind === "sheets") openSheetsPanel(); return; }
+    if (!p.sh?.id) return; let raw; try { raw = JSON.stringify(p.sh); } catch { return; } if (raw.length > 90000) return;
+    const prev = shById(String(p.sh.id));
+    if (prev ? !mineOf(prev) : String(p.sh.o || "").toLowerCase() !== who) { if (prev) send("sheet", {sh: prev}); return; }
+    const sh = shClean(p.sh, prev || {o: String(p.who).slice(0, 30)}); if (prev) sheets[sheets.indexOf(prev)] = sh; else sheets.push(sh);
+    shSaveGM(); send("sheet", {sh}); shSyncTokens(sh);
+    if (shOpen === sh.id) { const a = document.activeElement; if (!(a && $("#sheetWin")?.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName))) drawSheet(); }
+    if (panelKind === "sheets") openSheetsPanel();
+  });
   chan.on("broadcast", {event: "doorres"}, ({payload: p}) => { // resposta do mestre sobre uma porta
     if (isGM || !p?.k) return; delete pendDoor[p.k]; if (p.lk) toast("🔒 A porta está trancada.", 1800);
     const w = walls().find(x => x.d && x.p?.join(",") === p.k); if (w && (w.o ? 1 : 0) !== p.o) { w.o = p.o; wallsVer++; losCache.clear(); dirty = true; }
@@ -3736,10 +4328,13 @@ async function boot(){
     if (p.x != null) {
       const [x, y] = t.sn === false ? [Math.round(p.x), Math.round(p.y)] : snapPoint(p.x, p.y, t.s || 1);
       if (!validPath(t, p.path)) { send("tok", {id: t.id, x: t.x, y: t.y, a: t.a, q: p.q}); return; } // caminho inválido (parede ou longe demais): devolve
-      pushTrail(t, p.path); t.x = x; t.y = y;
+      pushTrail(t, p.path); moveSpent(t, p.path.length - 1); t.x = x; t.y = y;
     }
     if (p.a != null) t.a = ((+p.a % 360) + 360) % 360;
     if (p.bi != null && t.b?.[p.bi] && isFinite(+p.bv)) t.b[p.bi].v = Math.round(+p.bv);
+    if (Array.isArray(p.cd)) t.cd = condClean(p.cd);
+    if (p.sh) { const sh = shById(String(p.sh)); if (sh && sh.o && (sh.o === "*" || sh.o.toLowerCase() === String(p.who || "").toLowerCase())) { for (const x of tokens) if (x.sh === sh.id && x !== t) delete x.sh; t.sh = sh.id; shSyncTokens(sh); } }
+    if (p.dash && inCombat(t) && !t.dash) { t.dash = 1; toast(`🏃 ${t.n || "Token"} usou Disparada.`, 1800); }
     if (Array.isArray(p.bars)) t.b = p.bars.slice(0, 8).map(b => ({n: String(b?.n || "").slice(0, 16), v: isFinite(+b?.v) ? Math.round(+b.v) : "", m: isFinite(+b?.m) && +b.m > 0 ? Math.round(+b.m) : "", c: /^#[0-9a-f]{6}$/i.test(b?.c || "") ? b.c : "#c0473a"}));
     delete tokLive[t.id]; send("tok", {id: t.id, x: t.x, y: t.y, a: t.a, q: p.q}); save("tokens", true, 600); dirty = true;
   });
@@ -3760,6 +4355,8 @@ async function boot(){
   chan.on("broadcast", {event: "view"}, ({payload: p}) => { if (!isGM && p) { centerOn(p.x, p.y, p.z); toast("O mestre levou você para esta parte do mapa."); } });
   chan.subscribe(st => { if (st === "SUBSCRIBED") chan.track({name: isGM ? "Mestre" : myNick, role: isGM ? "gm" : "player"}); $("#status").textContent = st === "SUBSCRIBED" ? (isGM ? "ao vivo · jogadores veem o que você fizer" : "ao vivo") : "reconectando…"; });
   drawDiceBar(); drawDiceLog(); vDraw();
+  shLoad(); chatLoad();
+  if (isGM) { sndLoad(); sb.channel("mapa-live").on("postgres_changes", {event: "*", schema: "public", table: "live_state"}, p => { const d = p.new; if (d?.id === 1) { liveMap = {music: d.music || null, amb: d.amb || {}}; if (panelKind === "snd") openSndPanel(); } }).subscribe(); }
   requestAnimationFrame(frame);
 }
 boot();
