@@ -259,6 +259,33 @@ function visibleMask(vs, ts) {
   }
   return [uc, B];
 }
+function paintAmbient(aDim, aDark) {
+  // escurece o mapa conforme Dia / Penumbra / Escuro, deixando claro onde há luz (tochas, fogueiras…)
+  const amb = scene.light || "day";
+  if (amb === "day") return;
+  const ts = curTs || tokens;
+  const [B, D] = lightMasks(ts.filter(t => isGM || !t.h));
+  const [ac, ax] = off("A");
+  ax.setTransform(1, 0, 0, 1, 0, 0);
+  ax.globalCompositeOperation = "source-over";
+  ax.globalAlpha = 1;
+  ax.clearRect(0, 0, ac.width, ac.height);
+  ax.fillStyle = amb === "dark" ? "#05060c" : "#0b0a14";
+  ax.fillRect(0, 0, ac.width, ac.height);
+  ax.globalCompositeOperation = "destination-out";
+  ax.filter = `blur(${4 * LQ}px)`;
+  if (amb === "dark") { ax.globalAlpha = 0.55; ax.drawImage(D, 0, 0); }
+  ax.globalAlpha = 1;
+  ax.drawImage(B, 0, 0);
+  ax.filter = "none";
+  ax.globalCompositeOperation = "source-over";
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = amb === "dark" ? aDark : aDim;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(ac, 0, 0, cv.width, cv.height);
+  ctx.restore();
+}
 function paintLighting(vs, alpha = 1) {
   if (!vs.length) return;
   const ts = curTs || tokens.map(t => (tokLive[t.id] ? { ...t, ...tokLive[t.id] } : t));

@@ -439,14 +439,16 @@ function paint() {
   if (fog.on) paintFog();
   if (!isGM) {
     const vsL = viewers();
-    paintLighting(vsL);
+    if (vsL.length) paintLighting(vsL);
+    else paintAmbient(0.45, 0.88); // personagem sem visão configurada: vale só a luz do ambiente
     // objetos que bloqueiam (casas, árvores) aparecem por cima da escuridão quando alguém vê a borda deles
     if (vsL.length) for (const t of ts) if (isProp(t) && t.blk && !t.h && propSeen(t, vsL, ts)) paintProp(t);
-  } else if (gmPreview)
+  } else if (gmPreview && tokens.some(t => VI(t) && t.o))
     paintLighting(
       tokens.filter(t => VI(t) && t.o),
       0.92,
     );
+  else paintAmbient(0.3, 0.55); // o mestre vê o clima (mais leve, para continuar enxergando o mapa)
   if (isGM) paintWalls();
   if (drag?.kind === "fogrect") {
     const { a, b } = drag;
