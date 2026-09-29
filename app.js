@@ -102,18 +102,28 @@ function loadYT(){
 }
 function refreshDock(){ $("#ytDockWrap").hidden = !$("#ytDock").children.length; }
 
+// ---------- o mapa aberto neste PC já toca o som: esta aba fica muda para não dobrar ----------
+let mapOwnerAt = 0, mapMuted = false;
+const effVol = () => (Date.now() - mapOwnerAt < 5000 ? 0 : myVol);
+try { const bc = new BroadcastChannel("mesa-audio"); bc.onmessage = e => { if (e.data?.k === "map") { mapOwnerAt = Date.now(); checkMapMute(); } }; } catch {}
+function checkMapMute(){
+  const m = Date.now() - mapOwnerAt < 5000; if (m === mapMuted) return; mapMuted = m;
+  A.setMaster(myVol); if (m) toast("🗺️ O som está tocando pela aba do mapa (esta aba ficou muda para não dobrar).", 4500);
+  const n = document.getElementById("mapMuteNote"); if (n) n.hidden = !m;
+}
+setInterval(checkMapMute, 1500);
 // ---------- audio engine ----------
 const A = {
   ctx:null, master:null, music:null, amb:new Map(), buffers:new Map(), preview:null, sfxLive:new Set(),
   init(){
     if (this.ctx) { if (this.ctx.state === "suspended") this.ctx.resume(); return; }
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    this.master = this.ctx.createGain(); this.master.gain.value = myVol;
+    this.master = this.ctx.createGain(); this.master.gain.value = effVol();
     this.master.connect(this.ctx.destination);
     loadYT();
   },
   setMaster(v){
-    if (this.master) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, .05);
+    if (this.master) this.master.gain.setTargetAtTime(effVol(), this.ctx.currentTime, .05);
     for (const vc of this.all()) if (vc.type === "yt") vc.apply();
   },
   all(){ return [this.music, ...this.amb.values(), this.preview, ...this.ytPool.values()].filter(Boolean); },
@@ -148,7 +158,7 @@ const A = {
     const cap = document.createElement("span"); cap.textContent = (mode === "pool" ? "Efeito: " : "") + s.name; box.appendChild(cap);
     $("#ytDock").appendChild(box); refreshDock();
     const v = {type:"yt", mode, sid:s.id, target:vol, cur:0, player:null, ready:false, box, dead:false, noMaster:!!opts.noMaster,
-      apply(){ if (v.player?.setVolume) v.player.setVolume(Math.round(Math.max(0, Math.min(1, v.cur * (v.noMaster ? 1 : myVol))) * 100)); },
+      apply(){ if (v.player?.setVolume) v.player.setVolume(Math.round(Math.max(0, Math.min(1, v.cur * (v.noMaster ? 1 : effVol()))) * 100)); },
       fade(to, secs){
         v.target = to; clearInterval(v.iv);
         const from = v.cur, steps = Math.max(1, Math.round(secs*1000/60)); let i = 0;
