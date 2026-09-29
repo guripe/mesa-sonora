@@ -145,6 +145,21 @@ async function boot() {
     if (p.to !== "*" && String(p.to || "").toLowerCase() !== String(myNick || "").toLowerCase()) return;
     showHandout(p.item, true);
   });
+  chan.on("broadcast", { event: "shops" }, async ({ payload: p }) => { // o mestre mudou as lojas
+    if (isGM) return;
+    if (Array.isArray(p?.shops)) shops = p.shops; else await mkLoad();
+    mkDot();
+    if (p?.open) { toast(`🛒 “${String(p.open).slice(0, 40)}” abriu! Clique no carrinho na barra da esquerda.`, 4000); const d = $("#pShop .tdot"); if (d) d.hidden = false; }
+    if (panelKind === "shop") openShopPanel();
+  });
+  chan.on("broadcast", { event: "buyreq" }, ({ payload: p }) => mkBuy(p || {}));
+  chan.on("broadcast", { event: "sellreq" }, ({ payload: p }) => mkSell(p || {}));
+  chan.on("broadcast", { event: "buyres" }, ({ payload: p }) => {
+    if (isGM || !p || String(p.to || "").toLowerCase() !== String(myNick || "").toLowerCase()) return;
+    clearTimeout(mkWait); toast((p.ok ? "✅ " : "⚠️ ") + String(p.msg || "").slice(0, 160), 3500);
+    if (p.ok) { mkCart = {}; if (DS.init()) { const t = DS.ctx.currentTime; DS.tone(t, 988, 0.12, 0.08, "triangle"); DS.tone(t + 0.09, 1319, 0.2, 0.08, "triangle"); } }
+    setTimeout(() => { if (panelKind === "shop") openShopPanel(); }, 250);
+  });
   chan.on("broadcast", { event: "chat" }, ({ payload: p }) => {
     const m = p?.m;
     if (!m?.id || typeof m.tx !== "string") return;
@@ -386,6 +401,7 @@ async function boot() {
   drawDiceLog();
   vDraw();
   shLoad();
+  mkLoad().then(mkDot);
   chatLoad();
   if (!EDIT_ID) {
     sndLoad().then(() => MA.sync());
