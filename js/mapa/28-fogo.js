@@ -17,7 +17,7 @@ const FIRE_GLOW_ONLY = /(lanterna|poste)/;
 const fireKey = t => { const m = /([\w-]+)\.svg/.exec(t.img || ""); return m ? m[1] : ""; };
 const hash01 = s => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return ((h >>> 0) % 1000) / 1000; };
 function isFire(t) { // luz de fogo: objetos com chama, ou tokens com luz quente (tocha na mão)
-  if (!t?.li) return false;
+  if (!t?.li || !LI(t)) return false;
   if (isProp(t)) { const k = fireKey(t); return !!FIRE_SPOTS[k] || FIRE_GLOW_ONLY.test(k); }
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(t.li.c || "#ffbe5a");
   return !!m && parseInt(m[1], 16) > 190 && parseInt(m[3], 16) < 170;

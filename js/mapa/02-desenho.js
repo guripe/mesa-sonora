@@ -314,11 +314,17 @@ function openTokenList() {
 function frame() {
   if (isGM && scene.snd?.z?.length) zoneTick();
   if (pings.length || smoothBusy || walking || speakSet.size) dirty = true;
-  if (!dirty) { const now = performance.now(); if (now - fireT > 55) { fireT = now; if (fireVisible()) dirty = true; } }   // fogo animado (~18 quadros por segundo)
+  if (!dirty && typeof fireVisible === "function") { const now = performance.now(); if (now - fireT > 55) { fireT = now; try { if (fireVisible()) dirty = true; } catch {} } }   // fogo animado (~18 quadros por segundo)
   if (dirty) {
     dirty = false;
-    paint();
-    selBar();
+    try {
+      paint();
+      selBar();
+    } catch (err) { // um erro no desenho não pode travar o mapa inteiro
+      console.error(err);
+      try { ctx.restore(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; } catch {}
+      if (!frame.warned) { frame.warned = true; toast("Algo deu errado ao desenhar o mapa (" + String(err.message || err).slice(0, 80) + "). Me avise se continuar.", 6000); }
+    }
   }
   requestAnimationFrame(frame);
 }
@@ -407,8 +413,7 @@ function paint() {
   if (drag?.kind === "tplnew") paintTpl(drag.t, true);
   for (const t of ts) if (!isProp(t) && (isGM || !t.h) && (showTrails || selTok === t.id)) paintTrail(t);
   for (const t of ts) if (isGM || !t.h) paintLightGlow(t);
-  paintFlames(ts);
-  paintTokShadows(ts);
+  if (typeof paintFlames === "function") { paintFlames(ts); paintTokShadows(ts); }
   for (const t of ts) if (isGM || !t.h) paintAura(t);
   if (isGM && !gmPreview) for (const t of ts) if (VI(t)) paintVisionGM(t);
   const vsP = !isGM ? viewers() : [];
