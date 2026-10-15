@@ -917,8 +917,14 @@ function askNick() {
       `<form id="nickForm" style="display:flex;flex-direction:column;gap:10px;align-items:center"><b style="font:700 26px/1 var(--display);color:var(--brass)">Qual é o seu nome na mesa?</b>
       <span>O mestre usa esse nome para te dar o controle do seu personagem.</span>
       <input id="nickIn" maxlength="30" required style="background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:240px;text-align:center" placeholder="Seu nome">
-      <button class="btn primary">Entrar no mapa</button></form>`;
+      <button class="btn primary">Entrar no mapa</button>
+      <button class="btn" type="button" id="gmIn" style="margin-top:6px">👑 Sou o mestre</button></form>`;
     $("#nickIn").focus();
+    $("#gmIn").onclick = async () => {
+      const { error } = await sb.auth.signInAnonymously();
+      if (error) return toast(/anonymous/i.test(error.message) ? "Falta ligar o login anônimo no Supabase (Authentication → Sign In / Providers → Allow anonymous sign-ins)." : "Não deu: " + error.message, 9000);
+      location.reload();
+    };
     $("#nickForm").onsubmit = e => {
       e.preventDefault();
       myNick = $("#nickIn").value.trim().slice(0, 30);
