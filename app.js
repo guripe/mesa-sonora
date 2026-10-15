@@ -525,24 +525,10 @@ async function toggleFav(s){
 document.addEventListener("pointerdown", e => { if (openMenu && !openMenu.contains(e.target) && !e.target.closest("[data-menu]")) closeMenu(); });
 
 // ---------- login ----------
-function openLogin(){
-  const ov = document.createElement("div"); ov.className = "overlay";
-  ov.innerHTML = `<form class="dialog login" aria-labelledby="lgTitle">
-    <h3 id="lgTitle">Entrar como mestre</h3>
-    <p>Use o e-mail e a senha do mestre cadastrados no Supabase.</p>
-    <label class="field">E-mail<input id="lgEmail" type="email" autocomplete="username" required></label>
-    <label class="field">Senha<input id="lgPass" type="password" autocomplete="current-password" required></label>
-    <div class="err" id="lgErr"></div>
-    <div class="foot" style="gap:8px"><button class="btn" type="button" id="lgCancel">Cancelar</button><button class="btn primary" type="submit">Entrar</button></div></form>`;
-  document.body.appendChild(ov);
-  $("#lgEmail").focus();
-  $("#lgCancel").onclick = () => ov.remove();
-  ov.querySelector("form").onsubmit = async e => {
-    e.preventDefault();
-    const {error} = await sb.auth.signInWithPassword({email:$("#lgEmail").value.trim(), password:$("#lgPass").value});
-    if (error) { $("#lgErr").textContent = "E-mail ou senha incorretos."; return; }
-    ov.remove();
-  };
+async function becomeGM(){ // qualquer um pode ser o mestre: entra sem senha (sessão anônima do Supabase)
+  const {error} = await sb.auth.signInAnonymously();
+  if (!error) { toast("Você é o mestre agora. 👑"); return; }
+  toast(/anonymous/i.test(error.message) ? "Falta ligar o login anônimo no Supabase: Authentication → Sign In / Providers → Allow anonymous sign-ins." : "Não deu para virar mestre: " + error.message, 9000);
 }
 
 // ---------- rendering ----------
@@ -979,6 +965,7 @@ function track(){ chan?.track({name: isGM ? (nick || "Mestre") : (nick || "Jogad
 function ensureJoinedGM(){ if (!joined) { joined = true; A.init(); A.sync(); A.preloadSfx(); track(); } }
 
 // ---------- boot ----------
+$("#gateGM").onclick = () => becomeGM();
 $("#gateForm").onsubmit = e => {
   e.preventDefault();
   nick = $("#nick").value.trim().slice(0, 30);
@@ -987,7 +974,7 @@ $("#gateForm").onsubmit = e => {
 };
 $("#authBtn").onclick = async () => {
   if (isGM) { await sb.auth.signOut(); return; }
-  openLogin();
+  becomeGM();
 };
 document.addEventListener("keydown", e => {
   if (!isGM || e.ctrlKey || e.metaKey || e.altKey) return;
