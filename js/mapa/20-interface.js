@@ -920,9 +920,8 @@ function askNick() {
       <button class="btn primary">Entrar no mapa</button>
       <button class="btn" type="button" id="gmIn" style="margin-top:6px">👑 Sou o mestre</button></form>`;
     $("#nickIn").focus();
-    $("#gmIn").onclick = async () => {
-      const { error } = await sb.auth.signInAnonymously();
-      if (error) return toast(/anonymous/i.test(error.message) ? "Falta ligar o login anônimo no Supabase (Authentication → Sign In / Providers → Allow anonymous sign-ins)." : "Não deu: " + error.message, 9000);
+    $("#gmIn").onclick = () => {
+      try { localStorage.setItem("mesa.gm", "1"); } catch {}
       location.reload();
     };
     $("#nickForm").onsubmit = e => {

@@ -10,13 +10,7 @@ async function boot() {
     return;
   }
   sb = window.supabase.createClient(cfg.url, cfg.key);
-  const {
-    data: { session },
-  } = await sb.auth.getSession();
-  isGM = !!session;
-  sb.auth.onAuthStateChange((_e, s) => {
-    if (!!s !== isGM) location.reload();
-  });
+  isGM = (() => { try { return localStorage.getItem("mesa.gm") === "1"; } catch { return false; } })(); // sem login: "Sou o mestre" vale neste navegador
   drawTools();
   drawTop();
   setTool("move");
