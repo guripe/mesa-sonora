@@ -525,11 +525,10 @@ async function toggleFav(s){
 document.addEventListener("pointerdown", e => { if (openMenu && !openMenu.contains(e.target) && !e.target.closest("[data-menu]")) closeMenu(); });
 
 // ---------- login ----------
-async function becomeGM(){ // qualquer um pode ser o mestre: entra sem senha (sessão anônima do Supabase)
-  const {error} = await sb.auth.signInAnonymously();
-  if (!error) { toast("Você é o mestre agora. 👑"); return; }
-  toast(/anonymous/i.test(error.message) ? "Falta ligar o login anônimo no Supabase: Authentication → Sign In / Providers → Allow anonymous sign-ins." : "Não deu para virar mestre: " + error.message, 9000);
-}
+// sem login: quem clica em "Sou o mestre" vira mestre (fica guardado só neste navegador)
+const gmFlag = () => { try { return localStorage.getItem("mesa.gm") === "1"; } catch { return false; } };
+function becomeGM(){ try { localStorage.setItem("mesa.gm", "1"); } catch {} applySession(true); toast("Você é o mestre agora. 👑"); }
+function leaveGM(){ try { localStorage.removeItem("mesa.gm"); } catch {} applySession(false); }
 
 // ---------- rendering ----------
 let dragging = false, pendingRender = false;
@@ -973,7 +972,7 @@ $("#gateForm").onsubmit = e => {
   A.init(); joined = true; $("#gate").hidden = true; A.sync(); A.preloadSfx(); track(); render();
 };
 $("#authBtn").onclick = async () => {
-  if (isGM) { await sb.auth.signOut(); return; }
+  if (isGM) { leaveGM(); return; }
   becomeGM();
 };
 document.addEventListener("keydown", e => {
@@ -1014,9 +1013,7 @@ async function boot(){
   try { cfg = await (await fetch("/api/config", {cache:"no-store"})).json(); } catch {}
   if (!cfg?.url || !cfg?.key) { $("#view").innerHTML = `<div class="empty">O site ainda não foi ligado ao Supabase. Configure SUPABASE_URL e SUPABASE_ANON_KEY na Vercel e faça um novo deploy.</div>`; $("#roleLbl").textContent = "configuração pendente"; return; }
   sb = window.supabase.createClient(cfg.url, cfg.key);
-  const {data:{session: s0}} = await sb.auth.getSession();
-  applySession(s0);
-  sb.auth.onAuthStateChange((_ev, s) => { if (!!s !== isGM) applySession(s); });
+  applySession(gmFlag());
 
   await Promise.all([loadSounds(), loadLive(), loadFolders()]);
 
